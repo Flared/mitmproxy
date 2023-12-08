@@ -340,6 +340,7 @@ class Proxyserver(ServerManager):
             logger.warning(str(e))
 
     def server_connect(self, data: server_hooks.ServerConnectionHookData):
+        return # :)
         if data.server.sockname is None:
             data.server.sockname = self._connect_addr
 
