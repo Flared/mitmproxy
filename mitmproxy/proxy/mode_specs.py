@@ -19,6 +19,7 @@ Examples:
     RegularMode.parse("socks5")  # ValueError
 
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -31,7 +32,6 @@ from typing import ClassVar
 from typing import Literal
 
 import mitmproxy_rs
-
 from mitmproxy.coretypes.serializable import Serializable
 from mitmproxy.net import server_spec
 
@@ -81,7 +81,7 @@ class ProxyMode(Serializable, metaclass=ABCMeta):
         """The mode description that will be used in server logs and UI."""
 
     @property
-    def default_port(self) -> int:
+    def default_port(self) -> int | None:
         """
         Default listen port of servers for this mode, see `ProxyMode.listen_port()`.
         """
@@ -89,7 +89,7 @@ class ProxyMode(Serializable, metaclass=ABCMeta):
 
     @property
     @abstractmethod
-    def transport_protocol(self) -> Literal["tcp", "udp"] | None:
+    def transport_protocol(self) -> Literal["tcp", "udp", "both"]:
         """The transport protocol used by this mode's server."""
 
     @classmethod
@@ -146,11 +146,12 @@ class ProxyMode(Serializable, metaclass=ABCMeta):
         else:
             return ""
 
-    def listen_port(self, default: int | None = None) -> int:
+    def listen_port(self, default: int | None = None) -> int | None:
         """
         Return the port a server for this mode should listen on. This can be either directly
         specified in the spec, taken from a user-configured global default (`options.listen_port`),
         or from `ProxyMode.default_port`.
+        May be `None` for modes that don't bind to a specific address, e.g. local redirect mode.
         """
         if self.custom_listen_port is not None:
             return self.custom_listen_port
@@ -171,8 +172,9 @@ class ProxyMode(Serializable, metaclass=ABCMeta):
             raise dataclasses.FrozenInstanceError("Proxy modes are immutable.")
 
 
-TCP: Literal["tcp", "udp"] = "tcp"
-UDP: Literal["tcp", "udp"] = "udp"
+TCP: Literal["tcp", "udp", "both"] = "tcp"
+UDP: Literal["tcp", "udp", "both"] = "udp"
+BOTH: Literal["tcp", "udp", "both"] = "both"
 
 
 def _check_empty(data):
@@ -229,12 +231,14 @@ class ReverseMode(ProxyMode):
     # noinspection PyDataclass
     def __post_init__(self) -> None:
         self.scheme, self.address = server_spec.parse(self.data, default_scheme="https")
-        if self.scheme in ("http3", "dtls", "udp", "dns", "quic"):
+        if self.scheme in ("http3", "dtls", "udp", "quic"):
             self.transport_protocol = UDP
+        elif self.scheme in ("dns", "https"):
+            self.transport_protocol = BOTH
         self.description = f"{self.description} to {self.data}"
 
     @property
-    def default_port(self) -> int:
+    def default_port(self) -> int | None:
         if self.scheme == "dns":
             return 53
         return super().default_port
@@ -256,7 +260,7 @@ class DnsMode(ProxyMode):
 
     description = "DNS server"
     default_port = 53
-    transport_protocol = UDP
+    transport_protocol = BOTH
 
     def __post_init__(self) -> None:
         _check_empty(self.data)
@@ -290,18 +294,20 @@ class LocalMode(ProxyMode):
     """OS-level transparent proxy."""
 
     description = "Local redirector"
-    transport_protocol = None
+    transport_protocol = BOTH
+    default_port = None
 
     def __post_init__(self) -> None:
         # should not raise
-        mitmproxy_rs.LocalRedirector.describe_spec(self.data)
+        mitmproxy_rs.local.LocalRedirector.describe_spec(self.data)
 
 
 class OsProxyMode(ProxyMode):  # pragma: no cover
     """Deprecated alias for LocalMode"""
 
     description = "Deprecated alias for LocalMode"
-    transport_protocol = None
+    transport_protocol = BOTH
+    default_port = None
 
     def __post_init__(self) -> None:
         raise ValueError(

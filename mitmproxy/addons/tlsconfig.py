@@ -8,6 +8,7 @@ from typing import TypedDict
 
 from aioquic.h3.connection import H3_ALPN
 from aioquic.tls import CipherSuite
+from cryptography import x509
 from OpenSSL import crypto
 from OpenSSL import SSL
 
@@ -22,6 +23,8 @@ from mitmproxy.proxy import context
 from mitmproxy.proxy.layers import modes
 from mitmproxy.proxy.layers import quic
 from mitmproxy.proxy.layers import tls as proxy_tls
+
+logger = logging.getLogger(__name__)
 
 # We manually need to specify this, otherwise OpenSSL may select a non-HTTP2 cipher by default.
 # https://ssl-config.mozilla.org/#config=old
@@ -157,6 +160,12 @@ class TlsConfig:
             help="Use a specific elliptic curve for ECDHE key exchange on server connections. "
             'OpenSSL syntax, for example "prime256v1" (see `openssl ecparam -list_curves`).',
         )
+        loader.add_option(
+            name="request_client_cert",
+            typespec=bool,
+            default=False,
+            help=f"Requests a client certificate (TLS message 'CertificateRequest') to establish a mutual TLS connection between client and mitmproxy (combined with 'client_certs' option for mitmproxy and upstream).",
+        )
 
     def tls_clienthello(self, tls_clienthello: tls.ClientHelloData):
         conn_context = tls_clienthello.context
@@ -196,7 +205,7 @@ class TlsConfig:
             cipher_list=tuple(cipher_list),
             ecdh_curve=ctx.options.tls_ecdh_curve_client,
             chain_file=entry.chain_file,
-            request_client_cert=False,
+            request_client_cert=ctx.options.request_client_cert,
             alpn_select_callback=alpn_select_callback,
             extra_chain_certs=tuple(extra_chain_certs),
             dhparams=self.certstore.dhparams,
@@ -440,7 +449,7 @@ class TlsConfig:
                 else None,
             )
             if self.certstore.default_ca.has_expired():
-                logging.warning(
+                logger.warning(
                     "The mitmproxy certificate authority has expired!\n"
                     "Please delete all CA-related files in your ~/.mitmproxy folder.\n"
                     "The CA will be regenerated automatically after restarting mitmproxy.\n"
@@ -483,36 +492,75 @@ class TlsConfig:
                             f"Invalid ECDH curve: {ecdh_curve!r}"
                         ) from e
 
+        if "tls_version_client_min" in updated:
+            self._warn_unsupported_version("tls_version_client_min", True)
+        if "tls_version_client_max" in updated:
+            self._warn_unsupported_version("tls_version_client_max", False)
+        if "tls_version_server_min" in updated:
+            self._warn_unsupported_version("tls_version_server_min", True)
+        if "tls_version_server_max" in updated:
+            self._warn_unsupported_version("tls_version_server_max", False)
+
+    def _warn_unsupported_version(self, attribute: str, warn_unbound: bool):
+        val = net_tls.Version[getattr(ctx.options, attribute)]
+        supported_versions = [
+            v for v in net_tls.Version if net_tls.is_supported_version(v)
+        ]
+        supported_versions_str = ", ".join(v.name for v in supported_versions)
+
+        if val is net_tls.Version.UNBOUNDED:
+            if warn_unbound:
+                logger.info(
+                    f"{attribute} has been set to {val.name}. Note that your "
+                    f"OpenSSL build only supports the following TLS versions: {supported_versions_str}"
+                )
+        elif val not in supported_versions:
+            logger.warning(
+                f"{attribute} has been set to {val.name}, which is not supported by the current OpenSSL build. "
+                f"The current build only supports the following versions: {supported_versions_str}"
+            )
+
     def get_cert(self, conn_context: context.Context) -> certs.CertStoreEntry:
         """
         This function determines the Common Name (CN), Subject Alternative Names (SANs) and Organization Name
         our certificate should have and then fetches a matching cert from the certstore.
         """
-        altnames: list[str] = []
+        altnames: list[x509.GeneralName] = []
         organization: str | None = None
 
         # Use upstream certificate if available.
         if ctx.options.upstream_cert and conn_context.server.certificate_list:
             upstream_cert = conn_context.server.certificate_list[0]
             if upstream_cert.cn:
-                altnames.append(upstream_cert.cn)
+                altnames.append(_ip_or_dns_name(upstream_cert.cn))
             altnames.extend(upstream_cert.altnames)
             if upstream_cert.organization:
                 organization = upstream_cert.organization
 
         # Add SNI or our local IP address.
         if conn_context.client.sni:
-            altnames.append(conn_context.client.sni)
+            altnames.append(_ip_or_dns_name(conn_context.client.sni))
         else:
-            altnames.append(conn_context.client.sockname[0])
+            altnames.append(_ip_or_dns_name(conn_context.client.sockname[0]))
 
         # If we already know of a server address, include that in the SANs as well.
         if conn_context.server.address:
-            altnames.append(conn_context.server.address[0])
+            altnames.append(_ip_or_dns_name(conn_context.server.address[0]))
 
         # only keep first occurrence of each hostname
         altnames = list(dict.fromkeys(altnames))
 
         # RFC 2818: If a subjectAltName extension of type dNSName is present, that MUST be used as the identity.
         # In other words, the Common Name is irrelevant then.
-        return self.certstore.get_cert(altnames[0], altnames, organization)
+        cn = next((str(x.value) for x in altnames), None)
+        return self.certstore.get_cert(cn, altnames, organization)
+
+
+def _ip_or_dns_name(val: str) -> x509.GeneralName:
+    """Convert a string into either an x509.IPAddress or x509.DNSName object."""
+    try:
+        ip = ipaddress.ip_address(val)
+    except ValueError:
+        return x509.DNSName(val.encode("idna").decode())
+    else:
+        return x509.IPAddress(ip)
