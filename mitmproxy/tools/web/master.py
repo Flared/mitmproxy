@@ -42,7 +42,7 @@ class WebMaster(master.Master):
         self.addons.add(
             webaddons.WebAddon(),
             intercept.Intercept(),
-            readfile.ReadFile(),
+            readfile.ReadFileStdin(),
             static_viewer.StaticViewer(),
             self.view,
             self.events,
@@ -86,7 +86,11 @@ class WebMaster(master.Master):
         app.ClientConnection.broadcast(
             resource="state",
             cmd="update",
-            data={"servers": [s.to_json() for s in self.proxyserver.servers]},
+            payload={
+                "servers": {
+                    s.mode.full_spec: s.to_json() for s in self.proxyserver.servers
+                }
+            },
         )
 
     async def running(self):
