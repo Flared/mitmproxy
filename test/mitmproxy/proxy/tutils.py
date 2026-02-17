@@ -27,7 +27,7 @@ PlaybookEntryList = list[PlaybookEntry]
 
 def _eq(a: PlaybookEntry, b: PlaybookEntry) -> bool:
     """Compare two commands/events, and possibly update placeholders."""
-    if type(a) != type(b):
+    if type(a) is not type(b):
         return False
 
     a_dict = a.__dict__
@@ -159,6 +159,10 @@ class Playbook:
 
     def __rshift__(self, e):
         """Add an event to send"""
+        if isinstance(e, collections.abc.Iterable):
+            for ev in e:
+                self.__rshift__(ev)
+            return self
         assert isinstance(e, events.Event)
         self.expected.append(e)
         return self
@@ -166,6 +170,10 @@ class Playbook:
     def __lshift__(self, c):
         """Add an expected command"""
         if c is None:
+            return self
+        if isinstance(c, collections.abc.Iterable):
+            for cmd in c:
+                self.__lshift__(cmd)
             return self
         assert isinstance(c, commands.Command)
 
@@ -298,13 +306,13 @@ class Playbook:
 
 class reply(events.Event):
     args: tuple[Any, ...]
-    to: commands.Command | int
+    to: commands.Command | type[commands.Command] | int
     side_effect: Callable[[Any], Any]
 
     def __init__(
         self,
         *args,
-        to: commands.Command | int = -1,
+        to: commands.Command | type[commands.Command] | int = -1,
         side_effect: Callable[[Any], None] = lambda x: None,
     ):
         """Utility method to reply to the latest hook in playbooks."""
@@ -322,6 +330,14 @@ class reply(events.Event):
                 raise AssertionError(f"There is no command at offset {self.to}: {to}")
             else:
                 self.to = to
+        elif isinstance(self.to, type):
+            for cmd in reversed(playbook.actual):
+                if isinstance(cmd, self.to):
+                    assert isinstance(cmd, commands.Command)
+                    self.to = cmd
+                    break
+            else:
+                raise AssertionError(f"There is no command of type {self.to}.")
         for cmd in reversed(playbook.actual):
             if eq(self.to, cmd):
                 self.to = cmd
@@ -379,10 +395,10 @@ class _Placeholder(Generic[T]):
         return self._obj
 
     def __repr__(self):
-        return f"Placeholder:{repr(self._obj)}"
+        return f"Placeholder:{self._obj!r}"
 
     def __str__(self):
-        return f"Placeholder:{str(self._obj)}"
+        return f"Placeholder:{self._obj}"
 
 
 # noinspection PyPep8Naming

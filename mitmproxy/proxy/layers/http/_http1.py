@@ -11,6 +11,7 @@ from h11._receivebuffer import ReceiveBuffer
 from ...context import Context
 from ._base import format_error
 from ._base import HttpConnection
+from ._events import ErrorCode
 from ._events import HttpEvent
 from ._events import RequestData
 from ._events import RequestEndOfMessage
@@ -98,7 +99,9 @@ class Http1Connection(HttpConnection, metaclass=abc.ABCMeta):
                 yield commands.CloseConnection(self.conn)
                 yield ReceiveHttp(
                     self.ReceiveProtocolError(
-                        self.stream_id, f"HTTP/1 protocol error: {e}"
+                        self.stream_id,
+                        f"HTTP/1 protocol error: {e}",
+                        code=self.ReceiveProtocolError.code,
                     )
                 )
                 return
@@ -137,7 +140,7 @@ class Http1Connection(HttpConnection, metaclass=abc.ABCMeta):
                 self.ReceiveProtocolError(
                     self.stream_id,
                     f"Client disconnected.",
-                    code=status_codes.CLIENT_CLOSED_REQUEST,
+                    code=ErrorCode.CLIENT_DISCONNECTED,
                 )
             )
         else:  # pragma: no cover
@@ -264,12 +267,14 @@ class Http1Server(Http1Connection):
                 yield commands.SendData(self.conn, b"0\r\n\r\n")
             yield from self.mark_done(response=True)
         elif isinstance(event, ResponseProtocolError):
-            if not self.response and event.code != status_codes.NO_RESPONSE:
+            if not (self.conn.state & ConnectionState.CAN_WRITE):
+                return
+            status = event.code.http_status_code()
+            if not self.response and status is not None:
                 yield commands.SendData(
-                    self.conn, make_error_response(event.code, event.message)
+                    self.conn, make_error_response(status, event.message)
                 )
-            if self.conn.state & ConnectionState.CAN_WRITE:
-                yield commands.CloseConnection(self.conn)
+            yield commands.CloseConnection(self.conn)
         else:
             raise AssertionError(f"Unexpected event: {event}")
 
@@ -283,8 +288,6 @@ class Http1Server(Http1Connection):
                     self.request = http1.read_request_head(
                         [bytes(x) for x in request_head]
                     )
-                    if self.context.options.validate_inbound_headers:
-                        http1.validate_headers(self.request.headers)
                     expected_body_size = http1.expected_http_body_size(self.request)
                 except ValueError as e:
                     yield commands.SendData(self.conn, make_error_response(400, str(e)))
@@ -295,7 +298,9 @@ class Http1Server(Http1Connection):
                             RequestHeaders(self.stream_id, self.request, False)
                         )
                         yield ReceiveHttp(
-                            RequestProtocolError(self.stream_id, str(e), 400)
+                            RequestProtocolError(
+                                self.stream_id, str(e), ErrorCode.GENERIC_CLIENT_ERROR
+                            )
                         )
                     else:
                         yield commands.Log(
@@ -406,8 +411,6 @@ class Http1Client(Http1Connection):
                     self.response = http1.read_response_head(
                         [bytes(x) for x in response_head]
                     )
-                    if self.context.options.validate_inbound_headers:
-                        http1.validate_headers(self.response.headers)
                     expected_size = http1.expected_http_body_size(
                         self.request, self.response
                     )
@@ -415,7 +418,9 @@ class Http1Client(Http1Connection):
                     yield commands.CloseConnection(self.conn)
                     yield ReceiveHttp(
                         ResponseProtocolError(
-                            self.stream_id, f"Cannot parse HTTP response: {e}"
+                            self.stream_id,
+                            f"Cannot parse HTTP response: {e}",
+                            ErrorCode.GENERIC_SERVER_ERROR,
                         )
                     )
                     return
@@ -437,6 +442,7 @@ class Http1Client(Http1Connection):
                         ResponseProtocolError(
                             self.stream_id,
                             f"unexpected server response: {bytes(self.buf)!r}",
+                            ErrorCode.GENERIC_SERVER_ERROR,
                         )
                     )
                 else:
@@ -445,7 +451,9 @@ class Http1Client(Http1Connection):
                     # https://tools.ietf.org/html/rfc7231#section-6.5.11
                     yield ReceiveHttp(
                         ResponseProtocolError(
-                            self.stream_id, "server closed connection"
+                            self.stream_id,
+                            "server closed connection",
+                            ErrorCode.GENERIC_SERVER_ERROR,
                         )
                     )
             else:

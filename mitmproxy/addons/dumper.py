@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import itertools
-import logging
 import shutil
 import sys
 from typing import IO
@@ -9,6 +7,7 @@ from typing import Optional
 
 from wsproto.frame_protocol import CloseReason
 
+import mitmproxy_rs
 from mitmproxy import contentviews
 from mitmproxy import ctx
 from mitmproxy import dns
@@ -18,6 +17,7 @@ from mitmproxy import flowfilter
 from mitmproxy import http
 from mitmproxy.contrib import click as miniclick
 from mitmproxy.net.dns import response_codes
+from mitmproxy.options import CONTENT_VIEW_LINES_CUTOFF
 from mitmproxy.tcp import TCPFlow
 from mitmproxy.tcp import TCPMessage
 from mitmproxy.udp import UDPFlow
@@ -36,10 +36,12 @@ def indent(n: int, text: str) -> str:
 
 
 CONTENTVIEW_STYLES: dict[str, dict[str, str | bool]] = {
-    "highlight": dict(bold=True),
-    "offset": dict(fg="blue"),
-    "header": dict(fg="green", bold=True),
-    "text": dict(fg="green"),
+    "name": dict(fg="yellow"),
+    "string": dict(fg="green"),
+    "number": dict(fg="blue"),
+    "boolean": dict(fg="magenta"),
+    "comment": dict(dim=True),
+    "error": dict(fg="red"),
 }
 
 
@@ -54,12 +56,12 @@ class Dumper:
             "flow_detail",
             int,
             1,
-            """
+            f"""
             The display detail level for flows in mitmdump: 0 (quiet) to 4 (very verbose).
               0: no output
               1: shortened request URL with response status code
               2: full request URL with response status code and HTTP headers
-              3: 2 + truncated response content, content of WebSocket and TCP messages
+              3: 2 + truncated response content, content of WebSocket and TCP messages (content_view_lines_cutoff: {CONTENT_VIEW_LINES_CUTOFF})
               4: 3 + nothing is truncated
             """,
         )
@@ -68,7 +70,7 @@ class Dumper:
             str,
             "auto",
             "The default content view mode.",
-            choices=[i.name.lower() for i in contentviews.views],
+            choices=contentviews.registry.available_views(),
         )
         loader.add_option(
             "dumper_filter", Optional[str], None, "Limit which flows are dumped."
@@ -108,33 +110,38 @@ class Dumper:
         self.echo("--- HTTP Trailers", fg="magenta", ident=4)
         self._echo_headers(trailers)
 
-    def _colorful(self, line):
-        yield "    "  # we can already indent here
-        for style, text in line:
-            yield self.style(text, **CONTENTVIEW_STYLES.get(style, {}))
-
     def _echo_message(
         self,
         message: http.Message | TCPMessage | UDPMessage | WebSocketMessage,
         flow: http.HTTPFlow | TCPFlow | UDPFlow,
     ):
-        _, lines, error = contentviews.get_message_content_view(
-            ctx.options.dumper_default_contentview, message, flow
+        pretty = contentviews.prettify_message(
+            message,
+            flow,
+            ctx.options.dumper_default_contentview,
         )
-        if error:
-            logging.debug(error)
 
         if ctx.options.flow_detail == 3:
-            lines_to_echo = itertools.islice(lines, 70)
+            content_to_echo = strutils.cut_after_n_lines(
+                pretty.text, ctx.options.content_view_lines_cutoff
+            )
         else:
-            lines_to_echo = lines
+            content_to_echo = pretty.text
 
-        content = "\r\n".join("".join(self._colorful(line)) for line in lines_to_echo)
-        if content:
+        if content_to_echo:
+            highlighted = mitmproxy_rs.syntax_highlight.highlight(
+                pretty.text, pretty.syntax_highlight
+            )
             self.echo("")
-            self.echo(content)
+            self.echo(
+                "".join(
+                    self.style(chunk, **CONTENTVIEW_STYLES.get(tag, {}))
+                    for tag, chunk in highlighted
+                ),
+                ident=4,
+            )
 
-        if next(lines, None):
+        if len(content_to_echo) < len(pretty.text):
             self.echo("(cut off)", ident=4, dim=True)
 
         if ctx.options.flow_detail >= 2:
@@ -344,16 +351,16 @@ class Dumper:
         if self.match(f):
             message = f.messages[-1]
             direction = "->" if message.from_client else "<-"
-            if f.client_conn.tls_version == "QUIC":
+            if f.client_conn.tls_version == "QUICv1":
                 if f.type == "tcp":
                     quic_type = "stream"
                 else:
                     quic_type = "dgrams"
                 # TODO: This should not be metadata, this should be typed attributes.
                 flow_type = (
-                    f"quic {quic_type} {f.metadata.get('quic_stream_id_client','')} "
+                    f"quic {quic_type} {f.metadata.get('quic_stream_id_client', '')} "
                     f"{direction} mitmproxy {direction} "
-                    f"quic {quic_type} {f.metadata.get('quic_stream_id_server','')}"
+                    f"quic {quic_type} {f.metadata.get('quic_stream_id_server', '')}"
                 )
             else:
                 flow_type = f.type

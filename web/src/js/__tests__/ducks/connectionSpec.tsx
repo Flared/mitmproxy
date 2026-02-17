@@ -1,5 +1,4 @@
-import reduceConnection from "../../ducks/connection";
-import * as ConnectionActions from "../../ducks/connection";
+import reduceConnection, * as ConnectionActions from "../../ducks/connection";
 import { ConnectionState } from "../../ducks/connection";
 
 describe("connection reducer", () => {
@@ -12,7 +11,7 @@ describe("connection reducer", () => {
 
     it("should handle start fetch", () => {
         expect(
-            reduceConnection(undefined, ConnectionActions.startFetching())
+            reduceConnection(undefined, ConnectionActions.startFetching()),
         ).toEqual({
             state: ConnectionState.FETCHING,
             message: undefined,
@@ -22,12 +21,27 @@ describe("connection reducer", () => {
     it("should handle connection established", () => {
         expect(
             reduceConnection(
-                undefined,
-                ConnectionActions.connectionEstablished()
-            )
+                {
+                    state: ConnectionState.FETCHING,
+                    message: undefined,
+                },
+                ConnectionActions.finishFetching(),
+            ),
         ).toEqual({
             state: ConnectionState.ESTABLISHED,
             message: undefined,
+        });
+        expect(
+            reduceConnection(
+                {
+                    state: ConnectionState.ERROR,
+                    message: "we already failed",
+                },
+                ConnectionActions.finishFetching(),
+            ),
+        ).toEqual({
+            state: ConnectionState.ERROR,
+            message: "we already failed",
         });
     });
 
@@ -35,20 +49,11 @@ describe("connection reducer", () => {
         expect(
             reduceConnection(
                 undefined,
-                ConnectionActions.connectionError("no internet")
-            )
+                ConnectionActions.connectionError("no internet"),
+            ),
         ).toEqual({
             state: ConnectionState.ERROR,
             message: "no internet",
-        });
-    });
-
-    it("should handle offline mode", () => {
-        expect(
-            reduceConnection(undefined, ConnectionActions.setOffline())
-        ).toEqual({
-            state: ConnectionState.OFFLINE,
-            message: undefined,
         });
     });
 });

@@ -68,7 +68,7 @@ class Core:
         Mark flows.
         """
         updated = []
-        if marker not in emoji.emoji:
+        if not (marker == "" or marker in emoji.emoji):
             raise exceptions.CommandError(f"invalid marker value")
 
         for i in flows:
@@ -158,7 +158,7 @@ class Core:
                         req.url = val
                     except ValueError as e:
                         raise exceptions.CommandError(
-                            f"URL {repr(val)} is invalid: {e}"
+                            f"URL {val!r} is invalid: {e}"
                         ) from e
                 else:
                     self.rupdate = False

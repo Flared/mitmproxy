@@ -1,3 +1,4 @@
+import logging
 import re
 
 import urwid
@@ -23,7 +24,7 @@ class StackWidget(urwid.Frame):
         self.window = window
 
         if title:
-            header = urwid.AttrWrap(
+            header = urwid.AttrMap(
                 urwid.Text(title), "heading" if focus else "heading_inactive"
             )
         else:
@@ -60,6 +61,7 @@ class WindowStack:
             help=help.HelpView(master),
             eventlog=eventlog.EventLog(master),
             edit_focus_query=grideditor.QueryEditor(master),
+            edit_focus_comment=grideditor.CommentEditor(master),
             edit_focus_cookies=grideditor.CookieEditor(master),
             edit_focus_setcookies=grideditor.SetCookieEditor(master),
             edit_focus_setcookie_attrs=grideditor.CookieAttributeEditor(master),
@@ -129,7 +131,7 @@ class Window(urwid.Frame):
     def __init__(self, master):
         self.statusbar = statusbar.StatusBar(master)
         super().__init__(
-            None, header=None, footer=urwid.AttrWrap(self.statusbar, "background")
+            None, header=None, footer=urwid.AttrMap(self.statusbar, "background")
         )
         self.master = master
         self.master.view.sig_view_refresh.connect(self.view_changed)
@@ -185,7 +187,7 @@ class Window(urwid.Frame):
                 focus_column=self.pane,
             )
 
-        self.body = urwid.AttrWrap(w, "background")
+        self.body = urwid.AttrMap(w, "background")
         signals.window_refresh.send()
 
     def flow_changed(self, flow: flow.Flow) -> None:
@@ -304,6 +306,10 @@ class Window(urwid.Frame):
 
 
 class Screen(urwid.raw_display.Screen):
+    def __init__(self) -> None:
+        super().__init__()
+        self.logger = logging.getLogger("urwid")
+
     def write(self, data):
         if common.IS_WINDOWS_OR_WSL:
             # replace urwid's SI/SO, which produce artifacts under WSL.

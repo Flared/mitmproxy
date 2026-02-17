@@ -5,7 +5,7 @@ import { useAppSelector } from "../ducks";
 
 export default function Footer() {
     const version = useAppSelector((state) => state.backendState.version);
-    let {
+    const {
         mode,
         intercept,
         showhost,
@@ -23,6 +23,11 @@ export default function Footer() {
         server,
         ssl_insecure,
     } = useAppSelector((state) => state.options);
+
+    const selectedFlowsLength = useAppSelector(
+        (state) => state.flows.selected.length,
+    );
+    const totalFlowsLength = useAppSelector((state) => state.flows.list.length);
 
     return (
         <footer>
@@ -63,6 +68,11 @@ export default function Footer() {
             {stream_large_bodies && (
                 <span className="label label-success">
                     stream: {formatSize(stream_large_bodies)}
+                </span>
+            )}
+            {totalFlowsLength > 0 && (
+                <span className="label label-default">
+                    {selectedFlowsLength} of {totalFlowsLength} flows selected
                 </span>
             )}
             <div className="pull-right">

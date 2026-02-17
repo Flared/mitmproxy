@@ -49,6 +49,7 @@ def common_options(parser, opts):
     opts.make_parser(parser, "mode", short="m")
     opts.make_parser(parser, "anticache")
     opts.make_parser(parser, "showhost")
+    opts.make_parser(parser, "show_ignored_hosts")
     opts.make_parser(parser, "rfile", metavar="PATH", short="r")
     opts.make_parser(parser, "scripts", metavar="SCRIPT", short="s")
     opts.make_parser(parser, "stickycookie", metavar="FILTER")
@@ -66,6 +67,7 @@ def common_options(parser, opts):
     opts.make_parser(group, "tcp_hosts", metavar="HOST")
     opts.make_parser(group, "upstream_auth", metavar="USER:PASS")
     opts.make_parser(group, "proxyauth", metavar="SPEC")
+    opts.make_parser(group, "store_streamed_bodies")
     opts.make_parser(group, "rawtcp")
     opts.make_parser(group, "http2")
 

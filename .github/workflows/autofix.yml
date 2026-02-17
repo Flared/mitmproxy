@@ -13,18 +13,31 @@ jobs:
   autofix:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: mhils/workflows/checkout@8fe88b311a66c441e01edfebe4cd90d8a47fa335
+      - uses: mhils/workflows/setup-uv@8fe88b311a66c441e01edfebe4cd90d8a47fa335
 
-      - uses: install-pinned/ruff@0e35bc58bd73769469284df9e1f8898daeea8768
-      - run: ruff --fix-only .
+      # If we need to update the lockfile (--check returns an error),
+      # make sure to upgrade everything.
+      - run: uv lock --check || uv lock --upgrade
+
+      - uses: mhils/workflows/uv-sync@8fe88b311a66c441e01edfebe4cd90d8a47fa335
+
+      - run: ruff check --fix-only .
       - run: ruff format .
 
-      - name: Run prettier
-        run: |
-          npm ci
-          npm run prettier
+      - run: web/gen/all
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .github/node-version.txt
+      - run: npm ci
+        working-directory: web
+      - run: npm run eslint
+        working-directory: web
+        continue-on-error: true
+      - run: npm run prettier
         working-directory: web
 
       - uses: mhils/add-pr-ref-in-changelog@main
 
-      - uses: autofix-ci/action@d3e591514b99d0fca6779455ff8338516663f7cc
+      - uses: autofix-ci/action@635ffb0c9798bd160680f18fd73371e355b85f27

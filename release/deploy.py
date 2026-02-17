@@ -14,7 +14,9 @@ if __name__ == "__main__":
     if ref.startswith("refs/heads/"):
         branch = ref.replace("refs/heads/", "")
     elif ref.startswith("refs/tags/"):
-        tag = ref.replace("refs/tags/", "")
+        if not ref.startswith("refs/tags/v"):
+            raise AssertionError(f"Unexpected tag: {ref}")
+        tag = ref.replace("refs/tags/v", "")
     else:
         raise AssertionError
 
@@ -58,6 +60,7 @@ if __name__ == "__main__":
             env={
                 **os.environ,
                 "AWS_REGION": "auto",
+                "AWS_DEFAULT_REGION": "auto",
                 "AWS_ACCESS_KEY_ID": os.environ["R2_ACCESS_KEY_ID"],
                 "AWS_SECRET_ACCESS_KEY": os.environ["R2_SECRET_ACCESS_KEY"],
             },

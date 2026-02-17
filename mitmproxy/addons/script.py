@@ -29,7 +29,7 @@ def load_script(path: str) -> types.ModuleType | None:
     sys.modules.pop(fullname, None)
     oldpath = sys.path
     sys.path.insert(0, os.path.dirname(path))
-    m = None
+
     try:
         loader = importlib.machinery.SourceFileLoader(fullname, path)
         spec = importlib.util.spec_from_loader(fullname, loader=loader)
@@ -38,6 +38,7 @@ def load_script(path: str) -> types.ModuleType | None:
         loader.exec_module(m)
         if not getattr(m, "name", None):
             m.name = path  # type: ignore
+        return m
     except ImportError as e:
         if getattr(sys, "frozen", False):
             e.msg += (
@@ -48,11 +49,12 @@ def load_script(path: str) -> types.ModuleType | None:
                 f"(https://docs.mitmproxy.org/stable/overview-installation/#installation-from-the-python-package-index-pypi)."
             )
         script_error_handler(path, e)
+        return None
     except Exception as e:
         script_error_handler(path, e)
+        return None
     finally:
         sys.path[:] = oldpath
-        return m
 
 
 def script_error_handler(path: str, exc: Exception) -> None:
@@ -92,6 +94,7 @@ class Script:
             self.reloadtask = asyncio_utils.create_task(
                 self.watcher(),
                 name=f"script watcher for {path}",
+                keep_ref=False,
             )
         else:
             self.loadscript()
@@ -128,6 +131,9 @@ class Script:
                 ctx.master.addons.invoke_addon_sync(self.ns, hooks.RunningHook())
 
     async def watcher(self):
+        # Script loading is terminally confused at the moment.
+        # This here is a stopgap workaround to defer loading.
+        await asyncio.sleep(0)
         last_mtime = 0.0
         while True:
             try:

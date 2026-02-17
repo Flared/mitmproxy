@@ -1,7 +1,6 @@
 import binascii
 import json
 import os
-import re
 import time
 import urllib.parse
 import warnings
@@ -27,6 +26,7 @@ from mitmproxy.net.http import multipart
 from mitmproxy.net.http import status_codes
 from mitmproxy.net.http import url
 from mitmproxy.net.http.headers import assemble_content_type
+from mitmproxy.net.http.headers import infer_content_encoding
 from mitmproxy.net.http.headers import parse_content_type
 from mitmproxy.utils import human
 from mitmproxy.utils import strutils
@@ -316,6 +316,8 @@ class Message(serializable.Serializable):
         The raw (potentially compressed) HTTP message body.
 
         In contrast to `Message.content` and `Message.text`, accessing this property never raises.
+        `raw_content` may be `None` if the content is missing, for example due to body streaming
+        (see `Message.stream`). In contrast, `b""` signals a present but empty message body.
 
         *See also:* `Message.content`, `Message.text`
         """
@@ -402,45 +404,11 @@ class Message(serializable.Serializable):
         else:
             return self.raw_content
 
-    def _get_content_type_charset(self) -> str | None:
-        ct = parse_content_type(self.headers.get("content-type", ""))
-        if ct:
-            return ct[2].get("charset")
-        return None
-
-    def _guess_encoding(self, content: bytes = b"") -> str:
-        enc = self._get_content_type_charset()
-        if not enc:
-            if "json" in self.headers.get("content-type", ""):
-                enc = "utf8"
-        if not enc:
-            if "html" in self.headers.get("content-type", ""):
-                meta_charset = re.search(
-                    rb"""<meta[^>]+charset=['"]?([^'">]+)""", content, re.IGNORECASE
-                )
-                if meta_charset:
-                    enc = meta_charset.group(1).decode("ascii", "ignore")
-        if not enc:
-            if "text/css" in self.headers.get("content-type", ""):
-                # @charset rule must be the very first thing.
-                css_charset = re.match(
-                    rb"""@charset "([^"]+)";""", content, re.IGNORECASE
-                )
-                if css_charset:
-                    enc = css_charset.group(1).decode("ascii", "ignore")
-        if not enc:
-            enc = "latin-1"
-        # Use GB 18030 as the superset of GB2312 and GBK to fix common encoding problems on Chinese websites.
-        if enc.lower() in ("gb2312", "gbk"):
-            enc = "gb18030"
-
-        return enc
-
     def set_text(self, text: str | None) -> None:
         if text is None:
             self.content = None
             return
-        enc = self._guess_encoding()
+        enc = infer_content_encoding(self.headers.get("content-type", ""))
 
         try:
             self.content = cast(bytes, encoding.encode(text, enc))
@@ -464,7 +432,7 @@ class Message(serializable.Serializable):
         content = self.get_content(strict)
         if content is None:
             return None
-        enc = self._guess_encoding(content)
+        enc = infer_content_encoding(self.headers.get("content-type", ""), content)
         try:
             return cast(str, encoding.decode(content, enc))
         except ValueError:
@@ -497,12 +465,17 @@ class Message(serializable.Serializable):
     def decode(self, strict: bool = True) -> None:
         """
         Decodes body based on the current Content-Encoding header, then
-        removes the header. If there is no Content-Encoding header, no
-        action is taken.
+        removes the header.
+
+        If the message body is missing or empty, no action is taken.
 
         *Raises:*
          - `ValueError`, when the content-encoding is invalid and strict is True.
         """
+        if not self.raw_content:
+            # The body is missing (for example, because of body streaming or because it's a response
+            # to a HEAD request), so we can't correctly update content-length.
+            return
         decoded = self.get_content(strict)
         self.headers.pop("content-encoding", None)
         self.content = decoded
@@ -518,7 +491,7 @@ class Message(serializable.Serializable):
         self.headers["content-encoding"] = encoding
         self.content = self.raw_content
         if "content-encoding" not in self.headers:
-            raise ValueError(f"Invalid content encoding {repr(encoding)}")
+            raise ValueError(f"Invalid content encoding {encoding!r}")
 
     def json(self, **kwargs: Any) -> Any:
         """
@@ -825,12 +798,13 @@ class Request(Message):
         """
         if self.first_line_format == "authority":
             return f"{self.host}:{self.port}"
-        return url.unparse(self.scheme, self.host, self.port, self.path)
+        path = self.path if self.path != "*" else ""
+        return url.unparse(self.scheme, self.host, self.port, path)
 
     @url.setter
     def url(self, val: str | bytes) -> None:
         val = always_str(val, "utf-8", "surrogateescape")
-        self.scheme, self.host, self.port, self.path = url.parse(val)
+        self.scheme, self.host, self.port, self.path = url.parse(val)  # type: ignore
 
     @property
     def pretty_host(self) -> str:
@@ -861,8 +835,9 @@ class Request(Message):
 
         pretty_host, pretty_port = url.parse_authority(host_header, check=False)
         pretty_port = pretty_port or url.default_port(self.scheme) or 443
+        path = self.path if self.path != "*" else ""
 
-        return url.unparse(self.scheme, pretty_host, pretty_port, self.path)
+        return url.unparse(self.scheme, pretty_host, pretty_port, path)
 
     def _get_query(self):
         query = urllib.parse.urlparse(self.url).query
@@ -1013,9 +988,7 @@ class Request(Message):
             on generating the boundary.
             """
             boundary = "-" * 20 + binascii.hexlify(os.urandom(16)).decode()
-            self.headers["content-type"] = (
-                ct
-            ) = f"multipart/form-data; boundary={boundary}"
+            self.headers["content-type"] = ct = f"multipart/form-data; {boundary=!s}"
         self.content = multipart.encode_multipart(ct, value)
 
     @property

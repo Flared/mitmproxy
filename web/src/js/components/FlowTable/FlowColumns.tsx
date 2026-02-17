@@ -1,17 +1,22 @@
-import React, { ReactElement, useState } from "react";
-import { useDispatch } from "react-redux";
+import type { ReactElement } from "react";
+import React, { type JSX } from "react";
+import { useAppDispatch, useAppSelector } from "../../ducks";
 import classnames from "classnames";
+import type { sortFunctions } from "../../flow/utils";
 import {
     canReplay,
     endTime,
     getTotalSize,
-    RequestUtils,
-    ResponseUtils,
     startTime,
+    getIcon,
+    mainPath,
+    statusCode,
+    getMethod,
+    getVersion,
 } from "../../flow/utils";
 import { formatSize, formatTimeDelta, formatTimeStamp } from "../../utils";
 import * as flowActions from "../../ducks/flows";
-import { Flow } from "../../flow";
+import type { Flow } from "../../flow";
 
 type FlowColumnProps = {
     flow: Flow;
@@ -21,7 +26,6 @@ interface FlowColumn {
     (props: FlowColumnProps): JSX.Element;
 
     headerName: string; // Shown in the UI
-    sortKey: (flow: Flow) => any;
 }
 
 export const tls: FlowColumn = ({ flow }) => {
@@ -31,13 +35,20 @@ export const tls: FlowColumn = ({ flow }) => {
                 "col-tls",
                 flow.client_conn.tls_established
                     ? "col-tls-https"
-                    : "col-tls-http"
+                    : "col-tls-http",
             )}
         />
     );
 };
 tls.headerName = "";
-tls.sortKey = (flow) => flow.type === "http" && flow.request.scheme;
+
+export const index: FlowColumn = ({ flow }) => {
+    const index = useAppSelector(
+        (state) => state.flows._listIndex.get(flow.id)!,
+    );
+    return <td className="col-index">{index + 1}</td>;
+};
+index.headerName = "#";
 
 export const icon: FlowColumn = ({ flow }) => {
     return (
@@ -47,65 +58,6 @@ export const icon: FlowColumn = ({ flow }) => {
     );
 };
 icon.headerName = "";
-icon.sortKey = (flow) => getIcon(flow);
-
-const getIcon = (flow: Flow): string => {
-    if (flow.type !== "http") {
-        if (flow.client_conn.tls_version === "QUIC") {
-            return `resource-icon-quic`;
-        }
-        return `resource-icon-${flow.type}`;
-    }
-    if (flow.websocket) {
-        return "resource-icon-websocket";
-    }
-    if (!flow.response) {
-        return "resource-icon-plain";
-    }
-
-    var contentType = ResponseUtils.getContentType(flow.response) || "";
-
-    if (flow.response.status_code === 304) {
-        return "resource-icon-not-modified";
-    }
-    if (300 <= flow.response.status_code && flow.response.status_code < 400) {
-        return "resource-icon-redirect";
-    }
-    if (contentType.indexOf("image") >= 0) {
-        return "resource-icon-image";
-    }
-    if (contentType.indexOf("javascript") >= 0) {
-        return "resource-icon-js";
-    }
-    if (contentType.indexOf("css") >= 0) {
-        return "resource-icon-css";
-    }
-    if (contentType.indexOf("html") >= 0) {
-        return "resource-icon-document";
-    }
-
-    return "resource-icon-plain";
-};
-
-const mainPath = (flow: Flow): string => {
-    switch (flow.type) {
-        case "http":
-            return RequestUtils.pretty_url(flow.request);
-        case "tcp":
-        case "udp":
-            return `${flow.client_conn.peername.join(
-                ":"
-            )} ↔ ${flow.server_conn?.address?.join(":")}`;
-        case "dns":
-            return `${flow.request.questions
-                .map((q) => `${q.name} ${q.type}`)
-                .join(", ")} = ${
-                (flow.response?.answers.map((q) => q.data).join(", ") ??
-                    "...") ||
-                "?"
-            }`;
-    }
-};
 
 export const path: FlowColumn = ({ flow }) => {
     let err;
@@ -129,39 +81,16 @@ export const path: FlowColumn = ({ flow }) => {
     );
 };
 path.headerName = "Path";
-path.sortKey = (flow) => mainPath(flow);
 
 export const method: FlowColumn = ({ flow }) => (
-    <td className="col-method">{method.sortKey(flow)}</td>
+    <td className="col-method">{getMethod(flow)}</td>
 );
 method.headerName = "Method";
-method.sortKey = (flow) => {
-    switch (flow.type) {
-        case "http":
-            return flow.websocket
-                ? flow.client_conn.tls_established
-                    ? "WSS"
-                    : "WS"
-                : flow.request.method;
-        case "dns":
-            return flow.request.op_code;
-        default:
-            return flow.type.toUpperCase();
-    }
-};
 
 export const version: FlowColumn = ({ flow }) => (
-    <td className="col-http-version">{version.sortKey(flow)}</td>
+    <td className="col-http-version">{getVersion(flow)}</td>
 );
 version.headerName = "Version";
-version.sortKey = (flow) => {
-    switch (flow.type) {
-        case "http":
-            return flow.request.http_version;
-        default:
-            return "";
-    }
-};
 
 export const status: FlowColumn = ({ flow }) => {
     let color = "darkred";
@@ -195,31 +124,20 @@ export const status: FlowColumn = ({ flow }) => {
 
     return (
         <td className="col-status" style={{ color: color }}>
-            {status.sortKey(flow)}
+            {statusCode(flow)}
         </td>
     );
 };
 status.headerName = "Status";
-status.sortKey = (flow) => {
-    switch (flow.type) {
-        case "http":
-            return flow.response?.status_code;
-        case "dns":
-            return flow.response?.response_code;
-        default:
-            return undefined;
-    }
-};
 
 export const size: FlowColumn = ({ flow }) => {
     return <td className="col-size">{formatSize(getTotalSize(flow))}</td>;
 };
 size.headerName = "Size";
-size.sortKey = (flow) => getTotalSize(flow);
 
 export const time: FlowColumn = ({ flow }) => {
-    const start = startTime(flow),
-        end = endTime(flow);
+    const start = startTime(flow);
+    const end = endTime(flow);
     return (
         <td className="col-time">
             {start && end ? formatTimeDelta(1000 * (end - start)) : "..."}
@@ -227,11 +145,6 @@ export const time: FlowColumn = ({ flow }) => {
     );
 };
 time.headerName = "Time";
-time.sortKey = (flow) => {
-    const start = startTime(flow),
-        end = endTime(flow);
-    return start && end && end - start;
-};
 
 export const timestamp: FlowColumn = ({ flow }) => {
     const start = startTime(flow);
@@ -242,29 +155,17 @@ export const timestamp: FlowColumn = ({ flow }) => {
     );
 };
 timestamp.headerName = "Start time";
-timestamp.sortKey = (flow) => startTime(flow);
-
-const markers = {
-    ":red_circle:": "🔴",
-    ":orange_circle:": "🟠",
-    ":yellow_circle:": "🟡",
-    ":green_circle:": "🟢",
-    ":large_blue_circle:": "🔵",
-    ":purple_circle:": "🟣",
-    ":brown_circle:": "🟤",
-};
 
 export const quickactions: FlowColumn = ({ flow }) => {
-    const dispatch = useDispatch();
-    let [open, setOpen] = useState(false);
+    const dispatch = useAppDispatch();
 
-    let resume_or_replay: ReactElement | null = null;
+    let resume_or_replay: ReactElement<any> | null = null;
     if (flow.intercepted) {
         resume_or_replay = (
             <a
                 href="#"
                 className="quickaction"
-                onClick={() => dispatch(flowActions.resume(flow))}
+                onClick={() => dispatch(flowActions.resume([flow]))}
             >
                 <i className="fa fa-fw fa-play text-success" />
             </a>
@@ -274,7 +175,7 @@ export const quickactions: FlowColumn = ({ flow }) => {
             <a
                 href="#"
                 className="quickaction"
-                onClick={() => dispatch(flowActions.replay(flow))}
+                onClick={() => dispatch(flowActions.replay([flow]))}
             >
                 <i className="fa fa-fw fa-repeat text-primary" />
             </a>
@@ -282,20 +183,23 @@ export const quickactions: FlowColumn = ({ flow }) => {
     }
 
     return (
-        <td
-            className={classnames("col-quickactions", { hover: open })}
-            onClick={() => 0}
-        >
+        <td className="col-quickactions">
             {resume_or_replay ? <div>{resume_or_replay}</div> : <></>}
         </td>
     );
 };
-
 quickactions.headerName = "";
-quickactions.sortKey = (flow) => 0;
 
-export default {
+export const comment: FlowColumn = ({ flow }) => {
+    const text = flow.comment;
+    return <td className="col-comment">{text}</td>;
+};
+comment.headerName = "Comment";
+
+const FlowColumns: { [key in keyof typeof sortFunctions]: FlowColumn } = {
+    // parsed by web/gen/web_columns
     icon,
+    index,
     method,
     version,
     path,
@@ -305,4 +209,6 @@ export default {
     time,
     timestamp,
     tls,
+    comment,
 };
+export default FlowColumns;

@@ -4,6 +4,7 @@ This module is for blocking DNS over HTTPS requests.
 It loads a blocklist of IPs and hostnames that are known to serve DNS over HTTPS requests.
 It also uses headers, query params, and paths to detect DoH (and block it)
 """
+
 import logging
 
 # known DoH providers' hostnames and IP addresses to block
@@ -185,7 +186,8 @@ default_blocklist: dict = {
         "2606:4700:60:0:a71e:6467:cef8:2a56",
         "2620:10a:80bb::10",
         "2620:10a:80bb::20",
-        "2620:10a:80bb::30" "2620:10a:80bc::10",
+        "2620:10a:80bb::30",
+        "2620:10a:80bc::10",
         "2620:10a:80bc::20",
         "2620:10a:80bc::30",
         "2620:119:fc::2",

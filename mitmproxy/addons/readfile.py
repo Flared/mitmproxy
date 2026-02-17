@@ -10,6 +10,9 @@ from mitmproxy import ctx
 from mitmproxy import exceptions
 from mitmproxy import flowfilter
 from mitmproxy import io
+from mitmproxy.utils import asyncio_utils
+
+logger = logging.getLogger(__name__)
 
 
 class ReadFile:
@@ -68,17 +71,19 @@ class ReadFile:
         try:
             await self.load_flows_from_path(rfile)
         except exceptions.FlowReadException as e:
-            raise exceptions.OptionsError(e) from e
-        finally:
-            self._read_task = None
+            logger.exception(f"Failed to read {ctx.options.rfile}: {e}")
 
     def running(self):
         if ctx.options.rfile:
-            self._read_task = asyncio.create_task(self.doread(ctx.options.rfile))
+            self._read_task = asyncio_utils.create_task(
+                self.doread(ctx.options.rfile),
+                name="readfile",
+                keep_ref=False,
+            )
 
     @command.command("readfile.reading")
     def reading(self) -> bool:
-        return bool(self._read_task)
+        return bool(self._read_task and not self._read_task.done())
 
 
 class ReadFileStdin(ReadFile):

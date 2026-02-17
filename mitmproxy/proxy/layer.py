@@ -1,6 +1,7 @@
 """
 Base class for protocol layers.
 """
+
 import collections
 import textwrap
 from abc import abstractmethod
@@ -27,7 +28,7 @@ A function annotated with CommandGenerator[bool] may yield commands and ultimate
 """
 
 
-MAX_LOG_STATEMENT_SIZE = 512
+MAX_LOG_STATEMENT_SIZE = 2048
 """Maximum size of individual log statements before they will be truncated."""
 
 
@@ -262,7 +263,7 @@ class NextLayer(Layer):
         self._handle: Callable[[mevents.Event], CommandGenerator[None]] | None = None
 
     def __repr__(self):
-        return f"NextLayer:{repr(self.layer)}"
+        return f"NextLayer:{self.layer!r}"
 
     def handle_event(self, event: mevents.Event):
         if self._handle is not None:

@@ -20,6 +20,11 @@ class SimpleOverlay(urwid.Overlay, layoutwidget.LayoutWidget):
     def keyctx(self):
         return getattr(self.widget, "keyctx")
 
+    # mypy: Cannot override writeable attribute with read-only property
+    @keyctx.setter
+    def keyctx(self, value):
+        raise RuntimeError  # pragma: no cover
+
     def key_responder(self):
         return self.widget.key_responder()
 
@@ -45,7 +50,7 @@ class Choice(urwid.WidgetWrap):
         else:
             s = "option_selected" if focus else "text"
         super().__init__(
-            urwid.AttrWrap(
+            urwid.AttrMap(
                 urwid.Padding(urwid.Text(txt)),
                 s,
             )
@@ -107,7 +112,7 @@ class Chooser(urwid.WidgetWrap, layoutwidget.LayoutWidget):
 
         self.walker = ChooserListWalker(choices, current)
         super().__init__(
-            urwid.AttrWrap(
+            urwid.AttrMap(
                 urwid.LineBox(
                     urwid.BoxAdapter(urwid.ListBox(self.walker), len(choices)),
                     title=title,
@@ -152,7 +157,7 @@ class OptionsOverlay(urwid.WidgetWrap, layoutwidget.LayoutWidget):
         cols, rows = master.ui.get_cols_rows()
         self.ge = grideditor.OptionsEditor(master, name, vals)
         super().__init__(
-            urwid.AttrWrap(
+            urwid.AttrMap(
                 urwid.LineBox(urwid.BoxAdapter(self.ge, rows - vspace), title=name),
                 "background",
             )
@@ -176,7 +181,7 @@ class DataViewerOverlay(urwid.WidgetWrap, layoutwidget.LayoutWidget):
         cols, rows = master.ui.get_cols_rows()
         self.ge = grideditor.DataViewer(master, vals)
         super().__init__(
-            urwid.AttrWrap(
+            urwid.AttrMap(
                 urwid.LineBox(urwid.BoxAdapter(self.ge, rows - 5), title="Data viewer"),
                 "background",
             )

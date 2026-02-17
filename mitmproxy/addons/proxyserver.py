@@ -1,6 +1,7 @@
 """
 This addon is responsible for starting/stopping the proxy server sockets/instances specified by the mode option.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -33,6 +34,7 @@ from mitmproxy.proxy.layers.websocket import WebSocketMessageInjected
 from mitmproxy.proxy.mode_servers import ProxyConnectionHandler
 from mitmproxy.proxy.mode_servers import ServerInstance
 from mitmproxy.proxy.mode_servers import ServerManager
+from mitmproxy.utils import asyncio_utils
 from mitmproxy.utils import human
 from mitmproxy.utils import signals
 
@@ -74,6 +76,11 @@ class Servers:
                 if spec not in new_instances
             ]
 
+            if not start_tasks and not stop_tasks:
+                return (
+                    True  # nothing to do, so we don't need to trigger `self.changed`.
+                )
+
             self._instances = new_instances
             # Notify listeners about the new not-yet-started servers.
             await self.changed.send()
@@ -113,7 +120,6 @@ class Proxyserver(ServerManager):
 
     is_running: bool
     _connect_addr: Address | None = None
-    _update_task: asyncio.Task | None = None
 
     def __init__(self):
         self.connections = {}
@@ -122,6 +128,10 @@ class Proxyserver(ServerManager):
 
     def __repr__(self):
         return f"Proxyserver({len(self.connections)} active conns)"
+
+    @command.command("proxyserver.active_connections")
+    def active_connections(self) -> int:
+        return len(self.connections)
 
     @contextmanager
     def register_connection(
@@ -134,6 +144,13 @@ class Proxyserver(ServerManager):
             del self.connections[connection_id]
 
     def load(self, loader):
+        loader.add_option(
+            "store_streamed_bodies",
+            bool,
+            False,
+            "Store HTTP request and response bodies when streamed (see `stream_large_bodies`). "
+            "This increases memory consumption, but makes it possible to inspect streamed bodies.",
+        )
         loader.add_option(
             "connection_strategy",
             str,
@@ -149,10 +166,10 @@ class Proxyserver(ServerManager):
             Optional[str],
             None,
             """
-            Stream data to the client if response body exceeds the given
+            Stream data to the client if request or response body exceeds the given
             threshold. If streamed, the body will not be stored in any way,
             and such responses cannot be modified. Understands k/m/g
-            suffixes, i.e. 3m for 3 megabytes.
+            suffixes, i.e. 3m for 3 megabytes. To store streamed bodies, see `store_streamed_bodies`.
             """,
         )
         loader.add_option(
@@ -250,14 +267,18 @@ class Proxyserver(ServerManager):
                     )
 
             # ...and don't listen on the same address.
-            listen_addrs = [
-                (
-                    m.listen_host(ctx.options.listen_host),
-                    m.listen_port(ctx.options.listen_port),
-                    m.transport_protocol,
-                )
-                for m in modes
-            ]
+            listen_addrs = []
+            for m in modes:
+                if m.transport_protocol == "both":
+                    protocols = ["tcp", "udp"]
+                else:
+                    protocols = [m.transport_protocol]
+                host = m.listen_host(ctx.options.listen_host)
+                port = m.listen_port(ctx.options.listen_port)
+                if port is None:
+                    continue
+                for proto in protocols:
+                    listen_addrs.append((host, port, proto))
             if len(set(listen_addrs)) != len(listen_addrs):
                 (host, port, _) = collections.Counter(listen_addrs).most_common(1)[0][0]
                 dup_addr = human.format_address((host or "0.0.0.0", port))
@@ -276,7 +297,11 @@ class Proxyserver(ServerManager):
                     )
 
             if self.is_running:
-                self._update_task = asyncio.create_task(self.servers.update(modes))
+                asyncio_utils.create_task(
+                    self.servers.update(modes),
+                    name="update servers",
+                    keep_ref=True,
+                )
 
     async def setup_servers(self) -> bool:
         """Setup proxy servers. This may take an indefinite amount of time to complete (e.g. on permission prompts)."""
@@ -299,7 +324,13 @@ class Proxyserver(ServerManager):
             )
         if connection_id not in self.connections:
             raise ValueError("Flow is not from a live connection.")
-        self.connections[connection_id].server_event(event)
+
+        asyncio_utils.create_task(
+            self.connections[connection_id].server_event(event),
+            name=f"inject_event",
+            keep_ref=True,
+            client=event.flow.client_conn.peername,
+        )
 
     @command.command("inject.websocket")
     def inject_websocket(

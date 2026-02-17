@@ -3,6 +3,7 @@ This addons is used for binaries to perform a minimal selftest. Use like so:
 
   mitmdump -s selftest.py -p 0
 """
+
 import asyncio
 import logging
 import ssl
@@ -10,6 +11,7 @@ import sys
 from pathlib import Path
 
 from mitmproxy import ctx
+from mitmproxy.utils import asyncio_utils
 
 
 def load(_):
@@ -22,13 +24,18 @@ def load(_):
 
 
 def running():
-    # attach is somewhere so that it's not collected.
-    ctx.task = asyncio.create_task(make_request())  # type: ignore
+    asyncio_utils.create_task(
+        make_request(),
+        name="selftest",
+        keep_ref=True,
+    )
 
 
 async def make_request():
     try:
         cafile = Path(ctx.options.confdir).expanduser() / "mitmproxy-ca.pem"
+        while not cafile.exists():
+            await asyncio.sleep(0.01)
         ssl_ctx = ssl.create_default_context(cafile=cafile)
         port = ctx.master.addons.get("proxyserver").listen_addrs()[0][1]
         reader, writer = await asyncio.open_connection("127.0.0.1", port, ssl=ssl_ctx)
