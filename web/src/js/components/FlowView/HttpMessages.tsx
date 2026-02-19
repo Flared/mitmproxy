@@ -10,7 +10,7 @@ import ValidateEditor from "../editors/ValidateEditor";
 import ValueEditor from "../editors/ValueEditor";
 
 import { useAppDispatch, useAppSelector } from "../../ducks";
-import { HTTPFlow, HTTPMessage, HTTPResponse } from "../../flow";
+import type { HTTPFlow, HTTPMessage, HTTPResponse } from "../../flow";
 import * as flowActions from "../../ducks/flows";
 import KeyValueListEditor from "../editors/KeyValueListEditor";
 import HttpMessage from "../contentviews/HttpMessage";
@@ -29,10 +29,11 @@ function RequestLine({ flow }: RequestLineProps) {
                     content={flow.request.method}
                     onEditDone={(method) =>
                         dispatch(
-                            flowActions.update(flow, { request: { method } })
+                            flowActions.update(flow, { request: { method } }),
                         )
                     }
                     isValid={(method) => method.length > 0}
+                    selectAllOnClick={true}
                 />
                 &nbsp;
                 <ValidateEditor
@@ -41,7 +42,7 @@ function RequestLine({ flow }: RequestLineProps) {
                         dispatch(
                             flowActions.update(flow, {
                                 request: { path: "", ...parseUrl(url) },
-                            })
+                            }),
                         )
                     }
                     isValid={(url) => !!parseUrl(url)?.host}
@@ -53,10 +54,11 @@ function RequestLine({ flow }: RequestLineProps) {
                         dispatch(
                             flowActions.update(flow, {
                                 request: { http_version },
-                            })
+                            }),
                         )
                     }
                     isValid={isValidHttpVersion}
+                    selectAllOnClick={true}
                 />
             </div>
         </div>
@@ -78,10 +80,11 @@ function ResponseLine({ flow }: ResponseLineProps) {
                     dispatch(
                         flowActions.update(flow, {
                             response: { http_version: nextVer },
-                        })
+                        }),
                     )
                 }
                 isValid={isValidHttpVersion}
+                selectAllOnClick={true}
             />
             &nbsp;
             <ValidateEditor
@@ -90,10 +93,11 @@ function ResponseLine({ flow }: ResponseLineProps) {
                     dispatch(
                         flowActions.update(flow, {
                             response: { code: parseInt(code) },
-                        })
+                        }),
                     )
                 }
                 isValid={(code) => /^\d+$/.test(code)}
+                selectAllOnClick={true}
             />
             {flow.response.http_version !== "HTTP/2.0" && (
                 <>
@@ -102,9 +106,10 @@ function ResponseLine({ flow }: ResponseLineProps) {
                         content={flow.response.reason}
                         onEditDone={(msg) =>
                             dispatch(
-                                flowActions.update(flow, { response: { msg } })
+                                flowActions.update(flow, { response: { msg } }),
                             )
                         }
+                        selectAllOnClick={true}
                     />
                 </>
             )}
@@ -181,16 +186,14 @@ const Message = React.memo(function Message({
 });
 
 export function Request() {
-    const flow = useAppSelector(
-        (state) => state.flows.byId[state.flows.selected[0]]
-    ) as HTTPFlow;
+    const flow = useAppSelector((state) => state.flows.selected[0]) as HTTPFlow;
     return <Message flow={flow} message={flow.request} />;
 }
 Request.displayName = "Request";
 
 export function Response() {
     const flow = useAppSelector(
-        (state) => state.flows.byId[state.flows.selected[0]]
+        (state) => state.flows.selected[0],
     ) as HTTPFlow & { response: HTTPResponse };
     return <Message flow={flow} message={flow.response} />;
 }

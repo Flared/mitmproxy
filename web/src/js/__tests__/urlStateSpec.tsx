@@ -1,13 +1,19 @@
-import initialize from "../urlState";
-import { updateStoreFromUrl, updateUrlFromStore } from "../urlState";
+import initialize, {
+    updateStoreFromUrl,
+    updateUrlFromStore,
+} from "../urlState";
 
-import reduceFlows from "../ducks/flows";
+import reduceFlows, * as flowActions from "../ducks/flows";
 import reduceUI from "../ducks/ui/index";
-import reduceEventLog from "../ducks/eventLog";
+import reduceEventLog, * as eventLogActions from "../ducks/eventLog";
 import reduceCommandBar from "../ducks/commandBar";
-import * as flowsActions from "../ducks/flows";
 
 import configureStore from "redux-mock-store";
+import { testState } from "./ducks/tutils";
+import type { RootStore } from "../ducks/store";
+import { setCurrent, Tab } from "../ducks/ui/tabs";
+import { selectTab } from "../ducks/ui/flow";
+import { setFilter, setHighlight } from "../ducks/ui/filter";
 
 const mockStore = configureStore();
 history.replaceState = jest.fn();
@@ -15,61 +21,61 @@ history.replaceState = jest.fn();
 describe("updateStoreFromUrl", () => {
     it("should handle search query", () => {
         window.location.hash = "#/flows?s=foo";
-        let store = mockStore();
-        updateStoreFromUrl(store);
-        expect(store.getActions()).toEqual([
-            { filter: "foo", type: "FLOWS_SET_FILTER" },
-        ]);
+        const store = mockStore(testState);
+        updateStoreFromUrl(store as RootStore);
+        expect(store.getActions()).toEqual([setFilter("foo")]);
     });
 
     it("should handle highlight query", () => {
         window.location.hash = "#/flows?h=foo";
-        let store = mockStore();
-        updateStoreFromUrl(store);
-        expect(store.getActions()).toEqual([
-            { highlight: "foo", type: "FLOWS_SET_HIGHLIGHT" },
-        ]);
+        const store = mockStore();
+        updateStoreFromUrl(store as RootStore);
+        expect(store.getActions()).toEqual([setHighlight("foo")]);
     });
 
     it("should handle show event log", () => {
         window.location.hash = "#/flows?e=true";
-        let initialState = { eventLog: reduceEventLog(undefined, {}) },
-            store = mockStore(initialState);
-        updateStoreFromUrl(store);
+        const initialState = {
+            eventLog: reduceEventLog(undefined, { type: "unknown" }),
+        };
+        const store = mockStore(initialState);
+        updateStoreFromUrl(store as RootStore);
         expect(store.getActions()).toEqual([
-            { type: "EVENTS_TOGGLE_VISIBILITY" },
+            eventLogActions.toggleVisibility(),
         ]);
     });
 
     it("should handle unimplemented query argument", () => {
         window.location.hash = "#/flows?foo=bar";
         console.error = jest.fn();
-        let store = mockStore();
-        updateStoreFromUrl(store);
+        const store = mockStore();
+        updateStoreFromUrl(store as RootStore);
         expect(console.error).toBeCalledWith(
-            "unimplemented query arg: foo=bar"
+            "unimplemented query arg: foo=bar",
         );
     });
 
     it("should select flow and tab", () => {
-        window.location.hash = "#/flows/123/request";
-        let store = mockStore();
-        updateStoreFromUrl(store);
+        const tflow0 = testState.flows.list[0];
+        window.location.hash = `#/flows/${tflow0.id}/request`;
+        const store = mockStore(testState);
+        updateStoreFromUrl(store as RootStore);
         expect(store.getActions()).toEqual([
-            {
-                flowIds: ["123"],
-                type: "FLOWS_SELECT",
-            },
-            {
-                tab: "request",
-                type: "UI_FLOWVIEW_SET_TAB",
-            },
+            selectTab("request"),
+            flowActions.select([tflow0]),
         ]);
+    });
+
+    it("should handle capture tab", () => {
+        window.location.hash = "#/capture";
+        const store = mockStore();
+        updateStoreFromUrl(store as RootStore);
+        expect(store.getActions()).toEqual([setCurrent(Tab.Capture)]);
     });
 });
 
 describe("updateUrlFromStore", () => {
-    let initialState = {
+    const initialState = {
         flows: reduceFlows(undefined, { type: "other" }),
         ui: reduceUI(undefined, { type: "other" }),
         eventLog: reduceEventLog(undefined, { type: "other" }),
@@ -77,29 +83,24 @@ describe("updateUrlFromStore", () => {
     };
 
     it("should update initial url", () => {
-        let store = mockStore(initialState);
-        updateUrlFromStore(store);
+        const store = mockStore(initialState);
+        updateUrlFromStore(store as RootStore);
         expect(history.replaceState).toBeCalledWith(undefined, "", "/#/flows");
     });
 
     it("should update url", () => {
-        let flows = reduceFlows(undefined, flowsActions.select("123")),
-            state = {
-                ...initialState,
-                flows: reduceFlows(flows, flowsActions.setFilter("~u foo")),
-            },
-            store = mockStore(state);
-        updateUrlFromStore(store);
+        const store = mockStore(testState);
+        updateUrlFromStore(store as RootStore);
         expect(history.replaceState).toBeCalledWith(
             undefined,
             "",
-            "/#/flows/123/request?s=~u%20foo"
+            "/#/capture?s=~u%20%2Fsecond%20%7C%20~tcp%20%7C%20~dns%20%7C%20~udp&h=~u%20%2Fpath&e=true",
         );
     });
 });
 
 describe("initialize", () => {
-    let initialState = {
+    const initialState = {
         flows: reduceFlows(undefined, { type: "other" }),
         ui: reduceUI(undefined, { type: "other" }),
         eventLog: reduceEventLog(undefined, { type: "other" }),
@@ -107,7 +108,7 @@ describe("initialize", () => {
     };
 
     it("should handle initial state", () => {
-        let store = mockStore(initialState);
+        const store = mockStore(initialState);
         initialize(store);
         store.dispatch({ type: "foo" });
     });

@@ -1,61 +1,87 @@
 import { fetchApi } from "../utils";
 import * as optionsEditorActions from "./ui/optionsEditor";
-import { defaultState, Option, OptionsState } from "./_options_gen";
-import { AppThunk } from "./index";
+import { defaultState } from "./_options_gen";
+import type { Option, OptionsState } from "./_options_gen";
+import type { AppThunk } from "./index";
+import { createAction, createSlice } from "@reduxjs/toolkit";
 
-export const RECEIVE = "OPTIONS_RECEIVE";
-export const UPDATE = "OPTIONS_UPDATE";
-export const REQUEST_UPDATE = "REQUEST_UPDATE";
+export interface OptionMeta<T> {
+    value: T;
+    choices?: T[];
+    default: T;
+    help: string;
+    type: string;
+}
+
+export type OptionsStateWithMeta = {
+    [name in Option]: OptionMeta<OptionsState[name]>;
+};
+
+export const OPTIONS_RECEIVE =
+    createAction<OptionsStateWithMeta>("OPTIONS_RECEIVE");
+export const OPTIONS_UPDATE =
+    createAction<Partial<OptionsStateWithMeta>>("OPTIONS_UPDATE");
 
 export { Option, defaultState };
 
-export default function reducer(state = defaultState, action): OptionsState {
-    switch (action.type) {
-        case RECEIVE:
-            let s = <OptionsState>{};
-            // @ts-ignore
-            for (const [name, { value }] of Object.entries(action.data)) {
-                s[name] = value;
-            }
-            return s;
+const optionsSlice = createSlice({
+    name: "options",
+    initialState: defaultState,
+    reducers: {},
+    extraReducers: (builder) => {
+        builder
+            .addCase(OPTIONS_RECEIVE, (state, action) => {
+                const s = <OptionsState>{};
+                for (const [name, { value }] of Object.entries(
+                    action.payload,
+                )) {
+                    s[name] = value;
+                }
+                return s;
+            })
+            .addCase(OPTIONS_UPDATE, (state, action) => {
+                for (const [name, { value }] of Object.entries(
+                    action.payload,
+                )) {
+                    state[name] = value;
+                }
+            });
+    },
+});
 
-        case UPDATE:
-            let s2 = { ...state };
-            // @ts-ignore
-            for (const [name, { value }] of Object.entries(action.data)) {
-                s2[name] = value;
-            }
-            return s2;
-
-        default:
-            return state;
-    }
-}
+export default optionsSlice.reducer;
 
 export async function pureSendUpdate(option: Option, value, dispatch) {
     try {
-        const response = await fetchApi.put("/options", { [option]: value });
+        const response = await fetchApi.put("/options", {
+            [option]: value,
+        });
         if (response.status === 200) {
-            dispatch(optionsEditorActions.updateSuccess(option));
+            dispatch(optionsEditorActions.updateSuccess({ option }));
         } else {
             throw await response.text();
         }
     } catch (error) {
-        dispatch(optionsEditorActions.updateError(option, error));
+        dispatch(
+            optionsEditorActions.updateError({
+                option,
+                error: error.toString(),
+            }),
+        );
     }
 }
 
-let sendUpdate = pureSendUpdate; // _.throttle(pureSendUpdate, 500, {leading: true, trailing: true})
+const sendUpdate = pureSendUpdate; // _.throttle(pureSendUpdate, 500, {leading: true, trailing: true})
 
 export function update(name: Option, value: any): AppThunk {
     return (dispatch) => {
-        dispatch(optionsEditorActions.startUpdate(name, value));
+        dispatch(optionsEditorActions.startUpdate({ option: name, value }));
         sendUpdate(name, value, dispatch);
     };
 }
 
 export function save() {
-    return (dispatch) => fetchApi("/options/save", { method: "POST" });
+    return () => fetchApi("/options/save", { method: "POST" });
 }
 
 export function addInterceptFilter(example) {

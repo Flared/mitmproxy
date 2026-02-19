@@ -3,6 +3,7 @@ Inject a WebSocket message into a running connection.
 
 This example shows how to inject a WebSocket message into a running connection.
 """
+
 import asyncio
 
 from mitmproxy import ctx
@@ -33,7 +34,6 @@ async def inject_async(flow: http.HTTPFlow):
         msg = msg[1:] + msg[:1]
 
 
-# Python 3.11: replace with TaskGroup
 tasks = set()
 
 

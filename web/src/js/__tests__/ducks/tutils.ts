@@ -1,17 +1,16 @@
-import thunk from "redux-thunk";
-import configureStore, {
-    MockStoreCreator,
-    MockStoreEnhanced,
-} from "redux-mock-store";
 import { ConnectionState } from "../../ducks/connection";
 import { TDNSFlow, THTTPFlow, TTCPFlow, TUDPFlow } from "./_tflow";
-import { AppDispatch, RootState } from "../../ducks";
-import { DNSFlow, HTTPFlow, TCPFlow, UDPFlow } from "../../flow";
+import type { RootState, RootStore } from "../../ducks";
+import { middlewares, reducer } from "../../ducks/store";
+import type { DNSFlow, Flow, HTTPFlow, TCPFlow, UDPFlow } from "../../flow";
 import { defaultState as defaultOptions } from "../../ducks/options";
 import { TBackendState } from "./_tbackendstate";
-
-const mockStoreCreator: MockStoreCreator<RootState, AppDispatch> =
-    configureStore([thunk]);
+import { configureStore } from "@reduxjs/toolkit";
+import { Tab } from "../../ducks/ui/tabs";
+import { LogLevel } from "../../ducks/eventLog";
+import { ReverseProxyProtocols } from "../../backends/consts";
+import { defaultReverseState } from "../../modes/reverse";
+import { FilterName } from "../../ducks/ui/filter";
 
 export { THTTPFlow as TFlow, TTCPFlow, TUDPFlow };
 
@@ -66,43 +65,52 @@ export const testState: RootState = {
             activeModal: undefined,
         },
         optionsEditor: {
-            booleanOption: { isUpdating: true, error: false },
-            strOption: { error: true },
-            intOption: {},
-            choiceOption: {},
+            anticache: { isUpdating: true, error: false, value: true },
+            cert_passphrase: {
+                isUpdating: false,
+                error: "incorrect password",
+                value: "correcthorsebatterystaple",
+            },
+        },
+        tabs: {
+            current: Tab.Capture,
+        },
+        filter: {
+            [FilterName.Search]: "~u /second | ~tcp | ~dns | ~udp",
+            [FilterName.Highlight]: "~u /path",
         },
     },
     options: defaultOptions,
     flows: {
-        selected: [tflow1.id],
-        byId: {
-            [tflow0.id]: tflow0,
-            [tflow1.id]: tflow1,
-            [tflow2.id]: tflow2,
-            [tflow3.id]: tflow3,
-            [tflow4.id]: tflow4,
-        },
-        filter: "~u /second | ~tcp | ~dns | ~udp",
-        highlight: "~u /path",
+        selected: [tflow1],
+        selectedIds: new Set([tflow1.id]),
+        byId: new Map<string, Flow>([
+            [tflow0.id, tflow0],
+            [tflow1.id, tflow1],
+            [tflow2.id, tflow2],
+            [tflow3.id, tflow3],
+            [tflow4.id, tflow4],
+        ]),
         sort: {
             desc: true,
             column: "path",
         },
         view: [tflow1, tflow2, tflow3, tflow4],
         list: [tflow0, tflow1, tflow2, tflow3, tflow4],
-        listIndex: {
-            [tflow0.id]: 0,
-            [tflow1.id]: 1,
-            [tflow2.id]: 2,
-            [tflow3.id]: 3,
-            [tflow4.id]: 4,
-        },
-        viewIndex: {
-            [tflow1.id]: 0,
-            [tflow2.id]: 1,
-            [tflow3.id]: 2,
-            [tflow4.id]: 3,
-        },
+        _listIndex: new Map<string, number>([
+            [tflow0.id, 0],
+            [tflow1.id, 1],
+            [tflow2.id, 2],
+            [tflow3.id, 3],
+            [tflow4.id, 4],
+        ]),
+        _viewIndex: new Map<string, number>([
+            [tflow1.id, 0],
+            [tflow2.id, 1],
+            [tflow3.id, 2],
+            [tflow4.id, 3],
+        ]),
+        highlightedIds: new Set([tflow1.id]),
     },
     connection: {
         state: ConnectionState.ESTABLISHED,
@@ -117,19 +125,97 @@ export const testState: RootState = {
             error: true,
         },
         view: [
-            { id: "1", level: "info", message: "foo" },
-            { id: "2", level: "error", message: "bar" },
+            { id: "1", level: LogLevel.info, message: "foo" },
+            { id: "2", level: LogLevel.error, message: "bar" },
         ],
-        byId: {}, // TODO: incomplete
-        list: [], // TODO: incomplete
-        listIndex: {}, // TODO: incomplete
-        viewIndex: {}, // TODO: incomplete
+        list: [
+            { id: "1", level: LogLevel.info, message: "foo" },
+            { id: "2", level: LogLevel.error, message: "bar" },
+        ],
     },
     commandBar: {
         visible: false,
     },
+    modes: {
+        regular: [
+            {
+                active: true,
+                ui_id: 1,
+            },
+        ],
+        local: [
+            {
+                active: false,
+                selectedProcesses: "",
+                ui_id: 2,
+            },
+        ],
+        wireguard: [
+            {
+                active: false,
+                ui_id: 3,
+            },
+        ],
+        reverse: [
+            {
+                active: false,
+                protocol: ReverseProxyProtocols.HTTPS,
+                destination: "example.com",
+                ui_id: 4,
+            },
+            defaultReverseState(),
+        ],
+        transparent: [
+            {
+                active: false,
+                ui_id: 5,
+            },
+        ],
+        socks: [
+            {
+                active: false,
+                ui_id: 6,
+            },
+        ],
+        upstream: [
+            {
+                active: false,
+                destination: "example.com",
+                ui_id: 7,
+            },
+        ],
+        dns: [
+            {
+                active: false,
+                ui_id: 8,
+            },
+        ],
+    },
+    processes: {
+        currentProcesses: [
+            {
+                is_visible: true,
+                executable: "curl.exe",
+                is_system: false,
+                display_name: "curl",
+            },
+            {
+                is_visible: true,
+                executable: "http.exe",
+                is_system: false,
+                display_name: "http",
+            },
+        ],
+        isLoading: false,
+    },
 };
 
-export function TStore(): MockStoreEnhanced<RootState, AppDispatch> {
-    return mockStoreCreator(testState);
+export function TStore(
+    preloadedState: RootState | null = testState,
+): RootStore {
+    return configureStore({
+        reducer,
+        preloadedState: preloadedState ?? undefined,
+        middleware: (getDefaultMiddleware) => getDefaultMiddleware(middlewares),
+    });
 }

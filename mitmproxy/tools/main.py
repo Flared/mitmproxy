@@ -58,6 +58,7 @@ def run(
         logging.getLogger("tornado").setLevel(logging.WARNING)
         logging.getLogger("asyncio").setLevel(logging.WARNING)
         logging.getLogger("hpack").setLevel(logging.WARNING)
+        logging.getLogger("urwid").setLevel(logging.INFO)
         logging.getLogger("quic").setLevel(
             logging.WARNING
         )  # aioquic uses a different prefix...
@@ -98,7 +99,7 @@ def run(
             if extra:
                 if args.filter_args:
                     logging.info(
-                        f"Only processing flows that match \"{' & '.join(args.filter_args)}\""
+                        f'Only processing flows that match "{" & ".join(args.filter_args)}"'
                     )
                 opts.update(**extra(args))
 
@@ -116,10 +117,20 @@ def run(
         def _sigterm(*_):
             loop.call_soon_threadsafe(master.shutdown)
 
-        # We can't use loop.add_signal_handler because that's not available on Windows' Proactorloop,
-        # but signal.signal just works fine for our purposes.
-        signal.signal(signal.SIGINT, _sigint)
-        signal.signal(signal.SIGTERM, _sigterm)
+        try:
+            # Prefer loop.add_signal_handler where it is available
+            # https://github.com/mitmproxy/mitmproxy/issues/7128
+            loop.add_signal_handler(signal.SIGINT, _sigint)
+            loop.add_signal_handler(signal.SIGTERM, _sigterm)
+        except NotImplementedError:
+            # Fall back to `signal.signal` for platforms where that is not available (Windows' Proactorloop)
+            signal.signal(signal.SIGINT, _sigint)
+            signal.signal(signal.SIGTERM, _sigterm)
+
+        # to fix the issue mentioned https://github.com/mitmproxy/mitmproxy/issues/6744
+        # by setting SIGPIPE to SIG_IGN, the process will not terminate and continue to run
+        if hasattr(signal, "SIGPIPE"):
+            signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
         await master.run()
         return master

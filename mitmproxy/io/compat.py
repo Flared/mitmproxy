@@ -5,6 +5,7 @@ The flow file version is decoupled from the mitmproxy release cycle (since
 v3.0.0dev) and versioning. Every change or migration gets a new flow file
 version number, this prevents issues with developer builds and snapshots.
 """
+
 import copy
 import uuid
 from typing import Any
@@ -423,6 +424,15 @@ def convert_19_20(data):
     return data
 
 
+def convert_20_21(data):
+    data["version"] = 21
+    if data["client_conn"]["tls_version"] == "QUIC":
+        data["client_conn"]["tls_version"] = "QUICv1"
+    if data["server_conn"]["tls_version"] == "QUIC":
+        data["server_conn"]["tls_version"] = "QUICv1"
+    return data
+
+
 def _convert_dict_keys(o: Any) -> Any:
     if isinstance(o, dict):
         return {strutils.always_str(k): _convert_dict_keys(v) for k, v in o.items()}
@@ -487,6 +497,7 @@ converters = {
     17: convert_17_18,
     18: convert_18_19,
     19: convert_19_20,
+    20: convert_20_21,
 }
 
 
@@ -496,7 +507,7 @@ def migrate_flow(flow_data: dict[bytes | str, Any]) -> dict[bytes | str, Any]:
 
         # Historically, we used the mitmproxy minor version tuple as the flow format version.
         if not isinstance(flow_version, int):
-            flow_version = tuple(flow_version)[:2]
+            flow_version = tuple(flow_version)[:2]  # type: ignore
 
         if flow_version == version.FLOW_FORMAT_VERSION:
             break

@@ -9,6 +9,7 @@ References:
     - https://docs.microsoft.com/en-us/windows/uwp/monetize/python-code-examples-for-the-windows-store-submission-api
     - https://docs.microsoft.com/en-us/windows/uwp/monetize/python-code-examples-for-submissions-game-options-and-trailers
 """
+
 import http.client
 import json
 import os
@@ -48,6 +49,7 @@ client_secret = os.environ["MSFT_CLIENT_SECRET"]
 The client secret. Expires every 24 months and needs to be recreated at
 https://partner.microsoft.com/en-us/dashboard/account/v3/usermanagement
 or at https://portal.azure.com/ -> App registrations -> Certificates & Secrets -> Client secrets.
+(we only need to update the secret, the "Secret ID" can be ignored)
 """
 
 

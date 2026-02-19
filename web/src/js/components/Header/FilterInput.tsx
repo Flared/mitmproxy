@@ -1,17 +1,20 @@
 import React, { Component } from "react";
-import ReactDOM from "react-dom";
 import classnames from "classnames";
 import Filt from "../../filt/filt";
 import FilterDocs from "./FilterDocs";
 
+export enum FilterIcon {
+    SEARCH = "search",
+    HIGHLIGHT = "tag",
+    INTERCEPT = "pause",
+}
+
 type FilterInputProps = {
-    type: string;
-    color: any;
+    icon: FilterIcon;
+    color: string;
     placeholder: string;
     value: string;
-    onChange: (
-        value
-    ) => { type: string; filter?: string; highlight?: string } | void;
+    onChange: (value: string) => void;
 };
 
 type FilterInputState = {
@@ -24,6 +27,8 @@ export default class FilterInput extends Component<
     FilterInputProps,
     FilterInputState
 > {
+    inputRef = React.createRef<HTMLInputElement>();
+
     constructor(props, context) {
         super(props, context);
 
@@ -49,13 +54,13 @@ export default class FilterInput extends Component<
         this.setState({ value: nextProps.value });
     }
 
-    isValid(filt) {
+    isValid(filt: string) {
         try {
             if (filt) {
                 Filt.parse(filt);
             }
             return true;
-        } catch (e) {
+        } catch {
             return false;
         }
     }
@@ -71,7 +76,7 @@ export default class FilterInput extends Component<
         }
     }
 
-    onChange(e) {
+    onChange(e: React.ChangeEvent<HTMLInputElement>) {
         const value = e.target.value;
         this.setState({ value });
 
@@ -97,7 +102,7 @@ export default class FilterInput extends Component<
         this.setState({ mousefocus: false });
     }
 
-    onKeyDown(e) {
+    onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
         if (e.key === "Escape" || e.key === "Enter") {
             this.blur();
             // If closed using ESC/ENTER, hide the tooltip.
@@ -106,21 +111,26 @@ export default class FilterInput extends Component<
         e.stopPropagation();
     }
 
-    selectFilter(cmd) {
-        this.setState({ value: cmd });
-        ReactDOM.findDOMNode(this.refs.input).focus();
+    selectFilter(value: string) {
+        this.setState({ value });
+        this.inputRef.current?.focus();
+
+        // Only propagate valid filters upwards.
+        if (this.isValid(value)) {
+            this.props.onChange(value);
+        }
     }
 
     blur() {
-        ReactDOM.findDOMNode(this.refs.input).blur();
+        this.inputRef.current?.blur();
     }
 
     select() {
-        ReactDOM.findDOMNode(this.refs.input).select();
+        this.inputRef.current?.select();
     }
 
     render() {
-        const { type, color, placeholder } = this.props;
+        const { icon, color, placeholder } = this.props;
         const { value, focus, mousefocus } = this.state;
         return (
             <div
@@ -129,11 +139,11 @@ export default class FilterInput extends Component<
                 })}
             >
                 <span className="input-group-addon">
-                    <i className={"fa fa-fw fa-" + type} style={{ color }} />
+                    <i className={"fa fa-fw fa-" + icon} style={{ color }} />
                 </span>
                 <input
                     type="text"
-                    ref="input"
+                    ref={this.inputRef}
                     placeholder={placeholder}
                     className="form-control"
                     value={value}

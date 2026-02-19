@@ -1,6 +1,7 @@
 """
 Utility functions for decoding response bodies.
 """
+
 import codecs
 import collections
 import gzip
@@ -20,18 +21,15 @@ _cache = CachedDecode(None, None, None, None)
 
 
 @overload
-def decode(encoded: None, encoding: str, errors: str = "strict") -> None:
-    ...
+def decode(encoded: None, encoding: str, errors: str = "strict") -> None: ...
 
 
 @overload
-def decode(encoded: str, encoding: str, errors: str = "strict") -> str:
-    ...
+def decode(encoded: str, encoding: str, errors: str = "strict") -> str: ...
 
 
 @overload
-def decode(encoded: bytes, encoding: str, errors: str = "strict") -> str | bytes:
-    ...
+def decode(encoded: bytes, encoding: str, errors: str = "strict") -> str | bytes: ...
 
 
 def decode(
@@ -81,18 +79,15 @@ def decode(
 
 
 @overload
-def encode(decoded: None, encoding: str, errors: str = "strict") -> None:
-    ...
+def encode(decoded: None, encoding: str, errors: str = "strict") -> None: ...
 
 
 @overload
-def encode(decoded: str, encoding: str, errors: str = "strict") -> str | bytes:
-    ...
+def encode(decoded: str, encoding: str, errors: str = "strict") -> str | bytes: ...
 
 
 @overload
-def encode(decoded: bytes, encoding: str, errors: str = "strict") -> bytes:
-    ...
+def encode(decoded: bytes, encoding: str, errors: str = "strict") -> bytes: ...
 
 
 def encode(
@@ -150,18 +145,26 @@ def identity(content):
 
 
 def decode_gzip(content: bytes) -> bytes:
+    """Decode gzip or zlib-compressed data using zlib's auto-detection."""
     if not content:
         return b""
-    gfile = gzip.GzipFile(fileobj=BytesIO(content))
-    return gfile.read()
+
+    try:
+        # Using wbits=47 (32 + 15) tells zlib to automatically detect both gzip and zlib headers.
+        # This simplifies decoding and avoids the need for a separate gzip.GzipFile fallback.
+        # Reference: https://docs.python.org/3/library/zlib.html#zlib.decompress
+        decompressor = zlib.decompressobj(47)
+        return decompressor.decompress(content) + decompressor.flush()
+    except zlib.error as e:
+        raise ValueError(f"Decompression failed: {e}")
 
 
 def encode_gzip(content: bytes) -> bytes:
     s = BytesIO()
     # set mtime to 0 so that gzip encoding is deterministic.
-    gf = gzip.GzipFile(fileobj=s, mode="wb", mtime=0)
-    gf.write(content)
-    gf.close()
+    # Use compresslevel=1 for fastest compression speed.
+    with gzip.GzipFile(fileobj=s, mode="wb", mtime=0, compresslevel=1) as f:
+        f.write(content)
     return s.getvalue()
 
 
@@ -172,23 +175,20 @@ def decode_brotli(content: bytes) -> bytes:
 
 
 def encode_brotli(content: bytes) -> bytes:
-    return brotli.compress(content)
+    # Use quality=0 for fastest compression speed.
+    return brotli.compress(content, quality=0)
 
 
 def decode_zstd(content: bytes) -> bytes:
     if not content:
         return b""
     zstd_ctx = zstd.ZstdDecompressor()
-    try:
-        return zstd_ctx.decompress(content)
-    except zstd.ZstdError:
-        # If the zstd stream is streamed without a size header,
-        # try decoding with a 10MiB output buffer
-        return zstd_ctx.decompress(content, max_output_size=10 * 2**20)
+    return zstd_ctx.stream_reader(BytesIO(content), read_across_frames=True).read()
 
 
 def encode_zstd(content: bytes) -> bytes:
-    zstd_ctx = zstd.ZstdCompressor()
+    # Use level=1 for fastest compression speed.
+    zstd_ctx = zstd.ZstdCompressor(level=1)
     return zstd_ctx.compress(content)
 
 
@@ -213,7 +213,8 @@ def encode_deflate(content: bytes) -> bytes:
     """
     Returns compressed content, always including zlib header and checksum.
     """
-    return zlib.compress(content)
+    # Use level=1 for fastest compression speed.
+    return zlib.compress(content, level=1)
 
 
 custom_decode = {

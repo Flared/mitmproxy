@@ -1,21 +1,30 @@
 from __future__ import annotations
 
+import base64
 import itertools
 import random
 import struct
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from ipaddress import IPv4Address
 from ipaddress import IPv6Address
+from typing import Any
+from typing import cast
 from typing import ClassVar
+from typing import Self
 
 from mitmproxy import flow
 from mitmproxy.coretypes import serializable
 from mitmproxy.net.dns import classes
 from mitmproxy.net.dns import domain_names
+from mitmproxy.net.dns import https_records
 from mitmproxy.net.dns import op_codes
 from mitmproxy.net.dns import response_codes
 from mitmproxy.net.dns import types
+from mitmproxy.net.dns.https_records import HTTPSRecord
+from mitmproxy.net.dns.https_records import HTTPSRecordJSON
+from mitmproxy.net.dns.https_records import SVCParamKeys
 
 # DNS parameters taken from https://www.iana.org/assignments/dns-parameters/dns-parameters.xml
 
@@ -42,6 +51,14 @@ class Question(serializable.SerializableDataclass):
             "class": classes.to_str(self.class_),
         }
 
+    @classmethod
+    def from_json(cls, data: dict[str, str]) -> Self:
+        return cls(
+            name=data["name"],
+            type=types.from_str(data["type"]),
+            class_=classes.from_str(data["class"]),
+        )
+
 
 @dataclass
 class ResourceRecord(serializable.SerializableDataclass):
@@ -55,18 +72,7 @@ class ResourceRecord(serializable.SerializableDataclass):
     data: bytes
 
     def __str__(self) -> str:
-        try:
-            if self.type == types.A:
-                return str(self.ipv4_address)
-            if self.type == types.AAAA:
-                return str(self.ipv6_address)
-            if self.type in (types.NS, types.CNAME, types.PTR):
-                return self.domain_name
-            if self.type == types.TXT:
-                return self.text
-        except Exception:
-            return f"0x{self.data.hex()} (invalid {types.to_str(self.type)} data)"
-        return f"0x{self.data.hex()}"
+        return str(self._data_json())
 
     @property
     def text(self) -> str:
@@ -100,7 +106,69 @@ class ResourceRecord(serializable.SerializableDataclass):
     def domain_name(self, name: str) -> None:
         self.data = domain_names.pack(name)
 
-    def to_json(self) -> dict:
+    @property
+    def https_alpn(self) -> tuple[bytes, ...] | None:
+        record = https_records.unpack(self.data)
+        alpn_bytes = record.params.get(SVCParamKeys.ALPN.value, None)
+        if alpn_bytes is not None:
+            i = 0
+            ret = []
+            while i < len(alpn_bytes):
+                token_len = alpn_bytes[i]
+                ret.append(alpn_bytes[i + 1 : i + 1 + token_len])
+                i += token_len + 1
+            return tuple(ret)
+        else:
+            return None
+
+    @https_alpn.setter
+    def https_alpn(self, alpn: Iterable[bytes] | None) -> None:
+        record = https_records.unpack(self.data)
+        if alpn is None:
+            record.params.pop(SVCParamKeys.ALPN.value, None)
+        else:
+            alpn_bytes = b"".join(bytes([len(a)]) + a for a in alpn)
+            record.params[SVCParamKeys.ALPN.value] = alpn_bytes
+        self.data = https_records.pack(record)
+
+    @property
+    def https_ech(self) -> str | None:
+        record = https_records.unpack(self.data)
+        ech_bytes = record.params.get(SVCParamKeys.ECH.value, None)
+        if ech_bytes is not None:
+            return base64.b64encode(ech_bytes).decode("utf-8")
+        else:
+            return None
+
+    @https_ech.setter
+    def https_ech(self, ech: str | None) -> None:
+        record = https_records.unpack(self.data)
+        if ech is None:
+            record.params.pop(SVCParamKeys.ECH.value, None)
+        else:
+            ech_bytes = base64.b64decode(ech.encode("utf-8"))
+            record.params[SVCParamKeys.ECH.value] = ech_bytes
+        self.data = https_records.pack(record)
+
+    def _data_json(self) -> str | HTTPSRecordJSON:
+        try:
+            match self.type:
+                case types.A:
+                    return str(self.ipv4_address)
+                case types.AAAA:
+                    return str(self.ipv6_address)
+                case types.NS | types.CNAME | types.PTR:
+                    return self.domain_name
+                case types.TXT:
+                    return self.text
+                case types.HTTPS:
+                    return https_records.unpack(self.data).to_json()
+                case _:
+                    return f"0x{self.data.hex()}"
+        except Exception:
+            return f"0x{self.data.hex()} (invalid {types.to_str(self.type)} data)"
+
+    def to_json(self) -> dict[str, str | int | HTTPSRecordJSON]:
         """
         Converts the resource record into json for mitmweb.
         Sync with web/src/flow.ts.
@@ -110,8 +178,39 @@ class ResourceRecord(serializable.SerializableDataclass):
             "type": types.to_str(self.type),
             "class": classes.to_str(self.class_),
             "ttl": self.ttl,
-            "data": str(self),
+            "data": self._data_json(),
         }
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> Self:
+        inst = cls(
+            name=data["name"],
+            type=types.from_str(data["type"]),
+            class_=classes.from_str(data["class"]),
+            ttl=data["ttl"],
+            data=b"",
+        )
+
+        d: str = data["data"]
+        try:
+            match inst.type:
+                case types.A:
+                    inst.ipv4_address = IPv4Address(d)
+                case types.AAAA:
+                    inst.ipv6_address = IPv6Address(d)
+                case types.NS | types.CNAME | types.PTR:
+                    inst.domain_name = d
+                case types.TXT:
+                    inst.text = d
+                case types.HTTPS:
+                    record = HTTPSRecord.from_json(cast(HTTPSRecordJSON, d))
+                    inst.data = https_records.pack(record)
+                case _:
+                    raise ValueError
+        except Exception:
+            inst.data = bytes.fromhex(d.removeprefix("0x").partition(" (")[0])
+
+        return inst
 
     @classmethod
     def A(cls, name: str, ip: IPv4Address, *, ttl: int = DEFAULT_TTL) -> ResourceRecord:
@@ -142,14 +241,19 @@ class ResourceRecord(serializable.SerializableDataclass):
         """Create a textual resource record."""
         return cls(name, types.TXT, classes.IN, ttl, text.encode("utf-8"))
 
+    @classmethod
+    def HTTPS(
+        cls, name: str, record: HTTPSRecord, ttl: int = DEFAULT_TTL
+    ) -> ResourceRecord:
+        """Create a HTTPS resource record"""
+        return cls(name, types.HTTPS, classes.IN, ttl, https_records.pack(record))
+
 
 # comments are taken from rfc1035
 @dataclass
-class Message(serializable.SerializableDataclass):
+class DNSMessage(serializable.SerializableDataclass):
     HEADER: ClassVar[struct.Struct] = struct.Struct("!HHHHHH")
 
-    timestamp: float
-    """The time at which the message was sent or received."""
     id: int
     """An identifier assigned by the program that generates any kind of query."""
     query: bool
@@ -189,6 +293,9 @@ class Message(serializable.SerializableDataclass):
     additionals: list[ResourceRecord]
     """Third resource record section."""
 
+    timestamp: float | None = None
+    """The time at which the message was sent or received."""
+
     def __str__(self) -> str:
         return "\r\n".join(
             map(
@@ -201,8 +308,15 @@ class Message(serializable.SerializableDataclass):
 
     @property
     def content(self) -> bytes:
-        """Returns the user-friendly content of all parts as encoded bytes."""
-        return str(self).encode()
+        return self.packed
+
+    @property
+    def question(self) -> Question | None:
+        """DNS practically only supports a single question at the
+        same time, so this is a shorthand for this."""
+        if len(self.questions) == 1:
+            return self.questions[0]
+        return None
 
     @property
     def size(self) -> int:
@@ -214,10 +328,10 @@ class Message(serializable.SerializableDataclass):
             )
         )
 
-    def fail(self, response_code: int) -> Message:
+    def fail(self, response_code: int) -> DNSMessage:
         if response_code == response_codes.NOERROR:
             raise ValueError("response_code must be an error code.")
-        return Message(
+        return DNSMessage(
             timestamp=time.time(),
             id=self.id,
             query=False,
@@ -234,8 +348,8 @@ class Message(serializable.SerializableDataclass):
             additionals=[],
         )
 
-    def succeed(self, answers: list[ResourceRecord]) -> Message:
-        return Message(
+    def succeed(self, answers: list[ResourceRecord]) -> DNSMessage:
+        return DNSMessage(
             timestamp=time.time(),
             id=self.id,
             query=False,
@@ -253,15 +367,17 @@ class Message(serializable.SerializableDataclass):
         )
 
     @classmethod
-    def unpack(cls, buffer: bytes) -> Message:
+    def unpack(cls, buffer: bytes, timestamp: float | None = None) -> DNSMessage:
         """Converts the entire given buffer into a DNS message."""
-        length, msg = cls.unpack_from(buffer, 0)
+        length, msg = cls.unpack_from(buffer, 0, timestamp)
         if length != len(buffer):
             raise struct.error(f"unpack requires a buffer of {length} bytes")
         return msg
 
     @classmethod
-    def unpack_from(cls, buffer: bytes | bytearray, offset: int) -> tuple[int, Message]:
+    def unpack_from(
+        cls, buffer: bytes | bytearray, offset: int, timestamp: float | None = None
+    ) -> tuple[int, DNSMessage]:
         """Converts the buffer from a given offset into a DNS message and also returns its length."""
         (
             id,
@@ -270,9 +386,9 @@ class Message(serializable.SerializableDataclass):
             len_answers,
             len_authorities,
             len_additionals,
-        ) = Message.HEADER.unpack_from(buffer, offset)
-        msg = Message(
-            timestamp=time.time(),
+        ) = DNSMessage.HEADER.unpack_from(buffer, offset)
+        msg = DNSMessage(
+            timestamp=timestamp,
             id=id,
             query=(flags & (1 << 15)) == 0,
             op_code=(flags >> 11) & 0b1111,
@@ -287,7 +403,7 @@ class Message(serializable.SerializableDataclass):
             authorities=[],
             additionals=[],
         )
-        offset += Message.HEADER.size
+        offset += DNSMessage.HEADER.size
         cached_names = domain_names.cache()
 
         def unpack_domain_name() -> str:
@@ -305,7 +421,7 @@ class Message(serializable.SerializableDataclass):
                 offset += Question.HEADER.size
                 msg.questions.append(Question(name=name, type=type, class_=class_))
             except struct.error as e:
-                raise struct.error(f"question #{i}: {str(e)}")
+                raise struct.error(f"question #{i}: {e}")
 
         def unpack_rrs(
             section: list[ResourceRecord], section_name: str, count: int
@@ -324,23 +440,16 @@ class Message(serializable.SerializableDataclass):
                             f"unpack requires a data buffer of {len_data} bytes"
                         )
                     data = buffer[offset:end_data]
-                    if 0b11000000 in data:
-                        # the resource record might contains a compressed domain name, if so, uncompressed in advance
-                        try:
-                            (
-                                rr_name,
-                                rr_name_len,
-                            ) = domain_names.unpack_from_with_compression(
-                                buffer, offset, cached_names
-                            )
-                            if rr_name_len == len_data:
-                                data = domain_names.pack(rr_name)
-                        except struct.error:
-                            pass
+
+                    if domain_names.record_data_can_have_compression(type):
+                        data = domain_names.decompress_from_record_data(
+                            buffer, offset, end_data, cached_names
+                        )
+
                     section.append(ResourceRecord(name, type, class_, ttl, data))
                     offset += len_data
                 except struct.error as e:
-                    raise struct.error(f"{section_name} #{i}: {str(e)}")
+                    raise struct.error(f"{section_name} #{i}: {e}")
 
         unpack_rrs(msg.answers, "answer", len_answers)
         unpack_rrs(msg.authorities, "authority", len_authorities)
@@ -378,7 +487,7 @@ class Message(serializable.SerializableDataclass):
         flags |= self.response_code
         data = bytearray()
         data.extend(
-            Message.HEADER.pack(
+            DNSMessage.HEADER.pack(
                 self.id,
                 flags,
                 len(self.questions),
@@ -404,7 +513,7 @@ class Message(serializable.SerializableDataclass):
         Converts the message into json for mitmweb.
         Sync with web/src/flow.ts.
         """
-        return {
+        ret = {
             "id": self.id,
             "query": self.query,
             "op_code": op_codes.to_str(self.op_code),
@@ -419,22 +528,46 @@ class Message(serializable.SerializableDataclass):
             "authorities": [rr.to_json() for rr in self.authorities],
             "additionals": [rr.to_json() for rr in self.additionals],
             "size": self.size,
-            "timestamp": self.timestamp,
         }
+        if self.timestamp:
+            ret["timestamp"] = self.timestamp
+        return ret
 
-    def copy(self) -> Message:
+    @classmethod
+    def from_json(cls, data: Any) -> DNSMessage:
+        """Reconstruct a DNS message from JSON."""
+        inst = cls(
+            id=data["id"],
+            query=data["query"],
+            op_code=op_codes.from_str(data["op_code"]),
+            authoritative_answer=data["authoritative_answer"],
+            truncation=data["truncation"],
+            recursion_desired=data["recursion_desired"],
+            recursion_available=data["recursion_available"],
+            reserved=0,
+            response_code=response_codes.from_str(data["response_code"]),
+            questions=[Question.from_json(x) for x in data["questions"]],
+            answers=[ResourceRecord.from_json(x) for x in data["answers"]],
+            authorities=[ResourceRecord.from_json(x) for x in data["authorities"]],
+            additionals=[ResourceRecord.from_json(x) for x in data["additionals"]],
+        )
+        if ts := data.get("timestamp"):
+            inst.timestamp = ts
+        return inst
+
+    def copy(self) -> DNSMessage:
         # we keep the copy semantics but change the ID generation
         state = self.get_state()
         state["id"] = random.randint(0, 65535)
-        return Message.from_state(state)
+        return DNSMessage.from_state(state)
 
 
 class DNSFlow(flow.Flow):
     """A DNSFlow is a collection of DNS messages representing a single DNS query."""
 
-    request: Message
+    request: DNSMessage
     """The DNS request."""
-    response: Message | None = None
+    response: DNSMessage | None = None
     """The DNS response."""
 
     def get_state(self) -> serializable.State:
@@ -445,9 +578,11 @@ class DNSFlow(flow.Flow):
         }
 
     def set_state(self, state: serializable.State) -> None:
-        self.request = Message.from_state(state.pop("request"))
-        self.response = Message.from_state(r) if (r := state.pop("response")) else None
+        self.request = DNSMessage.from_state(state.pop("request"))
+        self.response = (
+            DNSMessage.from_state(r) if (r := state.pop("response")) else None
+        )
         super().set_state(state)
 
     def __repr__(self) -> str:
-        return f"<DNSFlow\r\n  request={repr(self.request)}\r\n  response={repr(self.response)}\r\n>"
+        return f"<DNSFlow\r\n  request={self.request!r}\r\n  response={self.response!r}\r\n>"

@@ -16,10 +16,9 @@ class TestScripts:
     def test_custom_contentviews(self, tdata):
         with taddons.context() as tctx:
             tctx.script(tdata.path("../examples/addons/contentview.py"))
-            swapcase = contentviews.get("swapcase")
-            _, fmt = swapcase(b"<html>Test!</html>")
-            assert any(b"tEST!" in val[0][1] for val in fmt)
-
+            swapcase = contentviews.registry["swapcase"]
+            result = swapcase.prettify(b"<html>Test!</html>", contentviews.Metadata())
+            assert "tEST!" in result
 
     def test_modify_form(self, tdata):
         with taddons.context() as tctx:

@@ -7,6 +7,7 @@ This is similar to the Blinker library (https://pypi.org/project/blinker/), with
   - supports type hints
   - supports async receivers.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -66,7 +67,7 @@ class _SignalMixin:
 
 class _SyncSignal(Generic[P], _SignalMixin):
     def connect(self, receiver: Callable[P, None]) -> None:
-        assert not asyncio.iscoroutinefunction(receiver)
+        assert not inspect.iscoroutinefunction(receiver)
         super().connect(receiver)
 
     def disconnect(self, receiver: Callable[P, None]) -> None:
