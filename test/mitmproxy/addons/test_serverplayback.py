@@ -313,9 +313,7 @@ def test_ignore_payload_params():
         b = f"--{boundary}\n"
         parts = []
         for k, v in kwargs.items():
-            parts.append(
-                'Content-Disposition: form-data; name="%s"\n\n' "%s\n" % (k, v)
-            )
+            parts.append('Content-Disposition: form-data; name="%s"\n\n%s\n' % (k, v))
         c = b + b.join(parts) + b
         r.request.content = c.encode()
         r.request.headers["content-type"] = "multipart/form-data; boundary=" + boundary
@@ -323,6 +321,24 @@ def test_ignore_payload_params():
     r = tflow.tflow(resp=True)
     r2 = tflow.tflow(resp=True)
     thash(r, r2, multipart_setter)
+
+
+def test_runtime_modify_params():
+    s = serverplayback.ServerPlayback()
+    with taddons.context(s) as tctx:
+        r = tflow.tflow(resp=True)
+        r.request.path = "/test?param1=1"
+        r2 = tflow.tflow(resp=True)
+        r2.request.path = "/test"
+
+        s.load_flows([r])
+        hash = next(iter(s.flowmap.keys()))
+
+        tctx.configure(s, server_replay_ignore_params=["param1"])
+        hash_mod = next(iter(s.flowmap.keys()))
+
+        assert hash != hash_mod
+        assert hash_mod == s._hash(r2)
 
 
 def test_server_playback_full():

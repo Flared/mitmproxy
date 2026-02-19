@@ -1,5 +1,6 @@
 import React, { useRef, useState } from "react";
-import ValueEditor, { ValueEditorProps } from "./ValueEditor";
+import type { ValueEditorProps } from "./ValueEditor";
+import ValueEditor from "./ValueEditor";
 import classnames from "classnames";
 
 interface ValidateEditorProps extends ValueEditorProps {
@@ -20,7 +21,7 @@ export default function ValidateEditor(props: ValidateEditorProps) {
 
     const className = classnames(
         props.className,
-        isValid ? "has-success" : "has-warning"
+        isValid ? "has-success" : "has-warning",
     );
     return (
         <ValueEditor

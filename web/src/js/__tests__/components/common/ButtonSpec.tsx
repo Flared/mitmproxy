@@ -1,34 +1,28 @@
 import * as React from "react";
-import renderer from "react-test-renderer";
 import Button from "../../../components/common/Button";
+import { render } from "../../test-utils";
 
 describe("Button Component", () => {
     it("should render correctly", () => {
-        let button = renderer.create(
-                <Button
-                    className="classname"
-                    onClick={() => "onclick"}
-                    title="title"
-                    icon="icon"
-                >
-                    <a>foo</a>
-                </Button>
-            ),
-            tree = button.toJSON();
-        expect(tree).toMatchSnapshot();
+        const { asFragment } = render(
+            <Button
+                className="classname"
+                onClick={() => "onclick"}
+                title="title"
+                icon="icon"
+            >
+                <a>foo</a>
+            </Button>,
+        );
+        expect(asFragment()).toMatchSnapshot();
     });
 
     it("should be able to be disabled", () => {
-        let button = renderer.create(
-                <Button
-                    className="classname"
-                    onClick={() => "onclick"}
-                    disabled
-                >
-                    <a>foo</a>
-                </Button>
-            ),
-            tree = button.toJSON();
-        expect(tree).toMatchSnapshot();
+        const { asFragment } = render(
+            <Button className="classname" onClick={() => "onclick"} disabled>
+                <a>foo</a>
+            </Button>,
+        );
+        expect(asFragment()).toMatchSnapshot();
     });
 });

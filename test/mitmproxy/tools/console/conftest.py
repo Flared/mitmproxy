@@ -30,12 +30,7 @@ class ConsoleTestMaster(ConsoleMaster):
             self.window.keypress(self.ui.get_cols_rows(), key)
 
     def screen_contents(self) -> str:
-        return b"\n".join(self.window.render((80, 24), True)._text_content()).decode()
-
-
-@pytest.fixture
-def console(monkeypatch) -> ConsoleTestMaster:
-    """Stupid workaround for https://youtrack.jetbrains.com/issue/PY-30279/"""
+        return b"\n".join(self.window.render((80, 24), True).text).decode()
 
 
 @pytest.fixture

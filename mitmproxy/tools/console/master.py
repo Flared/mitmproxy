@@ -29,6 +29,7 @@ from mitmproxy.tools.console import keymap
 from mitmproxy.tools.console import palettes
 from mitmproxy.tools.console import signals
 from mitmproxy.tools.console import window
+from mitmproxy.utils import strutils
 
 T = TypeVar("T", str, bytes)
 
@@ -66,15 +67,18 @@ class ConsoleMaster(master.Master):
     def options_error(self, exc) -> None:
         signals.status_message.send(message=str(exc), expire=1)
 
-    def prompt_for_exit(self) -> None:
+    def prompt_for_user_choice(self, prompt, callback) -> None:
         signals.status_prompt_onekey.send(
-            prompt="Quit",
+            prompt=prompt,
             keys=[
                 ("yes", "y"),
                 ("no", "n"),
             ],
-            callback=self.quit,
+            callback=callback,
         )
+
+    def prompt_for_exit(self) -> None:
+        self.prompt_for_user_choice("Quit", self.quit)
 
     def sig_add_log(self, entry: log.LogEntry):
         if log.log_tier(self.options.console_eventlog_verbosity) < log.log_tier(
@@ -85,7 +89,7 @@ class ConsoleMaster(master.Master):
             signals.status_message.send(
                 message=(
                     entry.level,
-                    f"{entry.level.title()}: {str(entry.msg).lstrip()}",
+                    f"{entry.level.title()}: {entry.msg.lstrip()}",
                 ),
                 expire=5,
             )
@@ -120,12 +124,23 @@ class ConsoleMaster(master.Master):
         else:
             return "vi"
 
+    def get_hex_editor(self) -> str:
+        editors = ["ghex", "hexedit", "hxd", "hexer", "hexcurse"]
+        for editor in editors:
+            if shutil.which(editor):
+                return editor
+        return self.get_editor()
+
     def spawn_editor(self, data: T) -> T:
-        text = not isinstance(data, bytes)
+        text = isinstance(data, str)
         fd, name = tempfile.mkstemp("", "mitmproxy", text=text)
+        with_hexeditor = isinstance(data, bytes) and strutils.is_mostly_bin(data)
         with open(fd, "w" if text else "wb") as f:
             f.write(data)
-        c = self.get_editor()
+        if with_hexeditor:
+            c = self.get_hex_editor()
+        else:
+            c = self.get_editor()
         cmd = shlex.split(c)
         cmd.append(name)
         with self.uistopped():

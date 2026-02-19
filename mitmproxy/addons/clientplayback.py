@@ -48,9 +48,9 @@ class MockServer(layers.http.HttpConnection):
     def _handle_event(self, event: events.Event) -> CommandGenerator[None]:
         if isinstance(event, events.Start):
             content = self.flow.request.raw_content
-            self.flow.request.timestamp_start = (
-                self.flow.request.timestamp_end
-            ) = time.time()
+            self.flow.request.timestamp_start = self.flow.request.timestamp_end = (
+                time.time()
+            )
             yield layers.http.ReceiveHttp(
                 layers.http.RequestHeaders(
                     1,
@@ -110,7 +110,7 @@ class ReplayHandler(server.ConnectionHandler):
         self.done = asyncio.Event()
 
     async def replay(self) -> None:
-        self.server_event(events.Start())
+        await self.server_event(events.Start())
         await self.done.wait()
 
     def log(
@@ -156,14 +156,20 @@ class ClientPlayback:
         self.replay_tasks = set()
 
     def running(self):
-        self.playback_task = asyncio_utils.create_task(
-            self.playback(), name="client playback"
-        )
         self.options = ctx.options
+        self.playback_task = asyncio_utils.create_task(
+            self.playback(),
+            name="client playback",
+            keep_ref=False,
+        )
 
-    def done(self):
+    async def done(self):
         if self.playback_task:
             self.playback_task.cancel()
+            try:
+                await self.playback_task
+            except asyncio.CancelledError:
+                pass
 
     async def playback(self):
         while True:
@@ -173,7 +179,9 @@ class ClientPlayback:
                 h = ReplayHandler(self.inflight, self.options)
                 if ctx.options.client_replay_concurrency == -1:
                     t = asyncio_utils.create_task(
-                        h.replay(), name="client playback awaiting response"
+                        h.replay(),
+                        name="client playback awaiting response",
+                        keep_ref=False,
                     )
                     # keep a reference so this is not garbage collected
                     self.replay_tasks.add(t)

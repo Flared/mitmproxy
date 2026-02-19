@@ -15,7 +15,12 @@ from mitmproxy.test import tutils
 @pytest.fixture
 def get_request():
     return tflow.tflow(
-        req=tutils.treq(method=b"GET", content=b"", path=b"/path?a=foo&a=bar&b=baz")
+        req=tutils.treq(
+            method=b"GET",
+            content=b"",
+            path=b"/path?a=foo&a=bar&b=baz",
+            headers=((b"header", b"qvalue"), (b"content-length", b"0")),
+        )
     )
 
 
@@ -58,6 +63,11 @@ def udp_flow():
     return tflow.tudpflow()
 
 
+@pytest.fixture
+def websocket_flow():
+    return tflow.twebsocketflow()
+
+
 @pytest.fixture(scope="module")
 def export_curl():
     e = export.Export()
@@ -76,6 +86,13 @@ class TestExportCurlCommand:
     def test_post(self, export_curl, post_request):
         post_request.request.content = b"nobinarysupport"
         result = "curl -X POST http://address:22/path -d nobinarysupport"
+        assert export_curl(post_request) == result
+
+    def test_post_with_no_content_has_explicit_content_length_header(
+        self, export_curl, post_request
+    ):
+        post_request.request.content = None
+        result = "curl -H 'content-length: 0' -X POST http://address:22/path"
         assert export_curl(post_request) == result
 
     def test_fails_with_binary_data(self, export_curl, post_request):
@@ -104,6 +121,16 @@ class TestExportCurlCommand:
         command = export_curl(request)
         assert shlex.split(command)[-2] == "-d"
         assert shlex.split(command)[-1] == "'&#"
+
+    def test_expand_escaped(self, export_curl, post_request):
+        post_request.request.content = b"foo\nbar"
+        result = "curl -X POST http://address:22/path -d \"$(printf 'foo\\x0abar')\""
+        assert export_curl(post_request) == result
+
+    def test_no_expand_when_no_escaped(self, export_curl, post_request):
+        post_request.request.content = b"foobar"
+        result = "curl -X POST http://address:22/path -d foobar"
+        assert export_curl(post_request) == result
 
     def test_strip_unnecessary(self, export_curl, get_request):
         get_request.request.headers.clear()
@@ -217,6 +244,11 @@ class TestRaw:
         ):
             export.raw(udp_flow)
 
+    def test_websocket(self, websocket_flow):
+        assert b"hello binary" in export.raw(websocket_flow)
+        assert b"hello text" in export.raw(websocket_flow)
+        assert b"it's me" in export.raw(websocket_flow)
+
 
 class TestRawRequest:
     def test_get(self, get_request):
@@ -254,6 +286,13 @@ class TestRawResponse:
         with pytest.raises(exceptions.CommandError):
             export.raw_response(udp_flow)
 
+    def test_head_non_zero_content_length(self):
+        request = tflow.tflow(
+            req=tutils.treq(method=b"HEAD"),
+            resp=tutils.tresp(headers=((b"content-length", b"7"),), content=b""),
+        )
+        assert b"content-length: 7" in export.raw_response(request)
+
 
 def qr(f):
     with open(f, "rb") as fp:
@@ -286,6 +325,10 @@ def test_export(tmp_path) -> None:
         assert qr(f)
         os.unlink(f)
 
+        e.file("raw", tflow.twebsocketflow(), f)
+        assert qr(f)
+        os.unlink(f)
+
 
 @pytest.mark.parametrize(
     "exception, log_message",
@@ -295,7 +338,7 @@ def test_export(tmp_path) -> None:
         (FileNotFoundError, "No such file or directory"),
     ],
 )
-async def test_export_open(exception, log_message, tmpdir, caplog):
+def test_export_open(exception, log_message, tmpdir, caplog):
     f = str(tmpdir.join("path"))
     e = export.Export()
     with mock.patch("mitmproxy.addons.export.open") as m:
@@ -304,7 +347,21 @@ async def test_export_open(exception, log_message, tmpdir, caplog):
         assert log_message in caplog.text
 
 
-async def test_clip(tmpdir, caplog):
+def test_export_str(tmpdir, caplog):
+    """Test that string export return a str without any UTF-8 surrogates"""
+    e = export.Export()
+    with taddons.context(e):
+        f = tflow.tflow()
+        f.request.headers.fields = (
+            (b"utf8-header", "é".encode("utf-8")),
+            (b"latin1-header", "é".encode("latin1")),
+        )
+        # ensure that we have no surrogates in the return value
+        assert e.export_str("curl", f).encode("utf8", errors="strict")
+        assert e.export_str("raw", f).encode("utf8", errors="strict")
+
+
+def test_clip(tmpdir, caplog):
     e = export.Export()
     with taddons.context() as tctx:
         tctx.configure(e)
@@ -330,7 +387,7 @@ async def test_clip(tmpdir, caplog):
 
         with mock.patch("pyperclip.copy") as pc:
             log_message = (
-                "Pyperclip could not find a " "copy/paste mechanism for your system."
+                "Pyperclip could not find a copy/paste mechanism for your system."
             )
             pc.side_effect = pyperclip.PyperclipException(log_message)
             e.clip("raw_request", tflow.tflow(resp=True))

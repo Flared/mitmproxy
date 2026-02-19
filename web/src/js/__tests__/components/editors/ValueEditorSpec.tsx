@@ -4,13 +4,15 @@ import { render, waitFor } from "../../test-utils";
 
 test("ValueEditor", async () => {
     const onEditDone = jest.fn();
-    let editor: { current?: ValueEditor | null } = {};
+    const editor: { current?: ValueEditor | null } = {};
     const { asFragment } = render(
         <ValueEditor
-            ref={(x) => (editor.current = x)}
+            ref={(x) => {
+                editor.current = x;
+            }}
             content="hello world"
             onEditDone={onEditDone}
-        />
+        />,
     );
     expect(asFragment()).toMatchSnapshot();
 

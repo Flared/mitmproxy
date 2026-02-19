@@ -95,8 +95,8 @@ if urwid.util.detected_encoding:
     SYMBOL_REPLAY = "\u21ba"
     SYMBOL_RETURN = "\u2190"
     SYMBOL_MARK = "\u25cf"
-    SYMBOL_UP = "\u21E7"
-    SYMBOL_DOWN = "\u21E9"
+    SYMBOL_UP = "\u21e7"
+    SYMBOL_DOWN = "\u21e9"
     SYMBOL_ELLIPSIS = "\u2026"
     SYMBOL_FROM_CLIENT = "\u21d2"
     SYMBOL_TO_CLIENT = "\u21d0"
@@ -188,7 +188,7 @@ class TruncatedText(urwid.Widget):
             text = text[::-1]
             attr = attr[::-1]
 
-        text_len = urwid.util.calc_width(text, 0, len(text))
+        text_len = urwid.calc_width(text, 0, len(text))
         if size is not None and len(size) > 0:
             width = size[0]
         else:
@@ -243,6 +243,9 @@ def rle_append_beginning_modify(rle, a_r):
 
 
 def colorize_host(host: str):
+    if not host:
+        return []
+
     tld = get_tld(host)
     sld = get_sld(host)
 
@@ -346,7 +349,7 @@ def format_http_content_type(content_type: str) -> tuple[str, str]:
 def format_duration(duration: float) -> tuple[str, str]:
     pretty_duration = human.pretty_duration(duration)
     style = "gradient_%02d" % int(
-        99 - 100 * min(math.log2(1 + 1000 * duration) / 12, 0.99)
+        99 - 100 * min(math.log2(max(1.0, 1000 * duration)) / 12, 0.99)
     )
     return pretty_duration, style
 
@@ -762,7 +765,7 @@ def format_flow(
             duration = f.messages[-1].timestamp - f.client_conn.timestamp_start
         else:
             duration = None
-        if f.client_conn.tls_version == "QUIC":
+        if f.client_conn.tls_version == "QUICv1":
             protocol = "quic"
         else:
             protocol = f.type
@@ -779,8 +782,11 @@ def format_flow(
             error_message=error_message,
         )
     elif isinstance(f, DNSFlow):
-        if f.response:
+        if f.request.timestamp and f.response and f.response.timestamp:
             duration = f.response.timestamp - f.request.timestamp
+        else:
+            duration = None
+        if f.response:
             response_code_str: str | None = dns.response_codes.to_str(
                 f.response.response_code
             )
@@ -789,7 +795,6 @@ def format_flow(
             )
             answer = ", ".join(str(x) for x in f.response.answers)
         else:
-            duration = None
             response_code_str = None
             response_code_http_equiv = 0
             answer = None

@@ -3,6 +3,7 @@ import * as flowsActions from "../flows";
 import * as modalActions from "./modal";
 import { tabsForFlow } from "../../components/FlowView";
 import { runCommand } from "../../utils";
+import type { AppDispatch, RootState } from "../store";
 
 export function onKeyDown(e: KeyboardEvent) {
     //console.debug("onKeyDown", e)
@@ -11,9 +12,10 @@ export function onKeyDown(e: KeyboardEvent) {
     }
     const key = e.key;
     e.preventDefault();
-    return (dispatch, getState) => {
-        const flows = getState().flows,
-            flow = flows.byId[getState().flows.selected[0]];
+    return (dispatch: AppDispatch, getState: () => RootState) => {
+        const { flows } = getState();
+        const selectedFlows = flows.selected;
+        const flow = selectedFlows[0];
 
         switch (key) {
             case "k":
@@ -47,21 +49,21 @@ export function onKeyDown(e: KeyboardEvent) {
                 if (getState().ui.modal.activeModal) {
                     dispatch(modalActions.hideModal());
                 } else {
-                    dispatch(flowsActions.select(undefined));
+                    dispatch(flowsActions.select([]));
                 }
                 break;
 
             case "ArrowLeft": {
                 if (!flow) break;
-                let tabs = tabsForFlow(flow),
-                    currentTab = getState().ui.flow.tab,
-                    nextTab =
-                        tabs[
-                            (Math.max(0, tabs.indexOf(currentTab)) -
-                                1 +
-                                tabs.length) %
-                                tabs.length
-                        ];
+                const tabs = tabsForFlow(flow);
+                const currentTab = getState().ui.flow.tab;
+                const nextTab =
+                    tabs[
+                        (Math.max(0, tabs.indexOf(currentTab)) -
+                            1 +
+                            tabs.length) %
+                            tabs.length
+                    ];
                 dispatch(selectTab(nextTab));
                 break;
             }
@@ -69,23 +71,20 @@ export function onKeyDown(e: KeyboardEvent) {
             case "Tab":
             case "ArrowRight": {
                 if (!flow) break;
-                let tabs = tabsForFlow(flow),
-                    currentTab = getState().ui.flow.tab,
-                    nextTab =
-                        tabs[
-                            (Math.max(0, tabs.indexOf(currentTab)) + 1) %
-                                tabs.length
-                        ];
+                const tabs = tabsForFlow(flow);
+                const currentTab = getState().ui.flow.tab;
+                const nextTab =
+                    tabs[
+                        (Math.max(0, tabs.indexOf(currentTab)) + 1) %
+                            tabs.length
+                    ];
                 dispatch(selectTab(nextTab));
                 break;
             }
 
             case "Delete":
             case "d": {
-                if (!flow) {
-                    return;
-                }
-                dispatch(flowsActions.remove(flow));
+                dispatch(flowsActions.remove(selectedFlows));
                 break;
             }
 
@@ -95,16 +94,11 @@ export function onKeyDown(e: KeyboardEvent) {
             }
 
             case "D": {
-                if (!flow) {
-                    return;
-                }
-                dispatch(flowsActions.duplicate(flow));
+                dispatch(flowsActions.duplicate(selectedFlows));
                 break;
             }
             case "a": {
-                if (flow && flow.intercepted) {
-                    dispatch(flowsActions.resume(flow));
-                }
+                dispatch(flowsActions.resume(selectedFlows));
                 break;
             }
             case "A": {
@@ -113,23 +107,17 @@ export function onKeyDown(e: KeyboardEvent) {
             }
 
             case "r": {
-                if (flow) {
-                    dispatch(flowsActions.replay(flow));
-                }
+                dispatch(flowsActions.replay(selectedFlows));
                 break;
             }
 
             case "v": {
-                if (flow && flow.modified) {
-                    dispatch(flowsActions.revert(flow));
-                }
+                dispatch(flowsActions.revert(selectedFlows));
                 break;
             }
 
             case "x": {
-                if (flow && flow.intercepted) {
-                    dispatch(flowsActions.kill(flow));
-                }
+                dispatch(flowsActions.kill(selectedFlows));
                 break;
             }
 
