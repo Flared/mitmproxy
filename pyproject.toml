@@ -6,8 +6,7 @@ requires-python = ">=3.12"
 license = {file="LICENSE"}
 authors = [{name = "Aldo Cortesi", email = "aldo@corte.si"}]
 maintainers = [{name = "Maximilian Hils", email = "mitmproxy@maximilianhils.com"}]
-dynamic = ["version"]
-
+version = "13.0.0-dev1+flare0"
 classifiers = [
     "License :: OSI Approved :: MIT License",
     "Development Status :: 5 - Production/Stable",
@@ -110,9 +109,6 @@ hook-dirs = "mitmproxy.utils.pyinstaller:hook_dirs"
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
-
-[tool.setuptools.dynamic]
-version = {attr = "mitmproxy.version.VERSION"}
 
 [tool.setuptools.packages.find]
 include = ["mitmproxy*"]
