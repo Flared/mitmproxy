@@ -22,6 +22,8 @@
   ([#8046](https://github.com/mitmproxy/mitmproxy/pull/8046), @HueCodes)
 - Added support for adding and editing comments on individual flows in the mitmproxy console.
   ([#7944](https://github.com/mitmproxy/mitmproxy/pull/7944), @lups2000)
+- Use stdlib (PEP-784) for Zstandard compression on Python 3.14+
+  ([#8397](https://github.com/mitmproxy/mitmproxy/pull/8397), @Rogdham)
 
 ## 24 November 2025: mitmproxy 12.2.1
 
