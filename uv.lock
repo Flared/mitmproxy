@@ -1045,7 +1045,7 @@ wheels = [
 
 [[package]]
 name = "mitmproxy"
-version = "13.0.0.dev1+flare1"
+version = "13.0.0.dev1+flare2"
 source = { editable = "." }
 dependencies = [
     { name = "aioquic" },
